@@ -67,6 +67,12 @@ struct NoiseMeasurement: Identifiable, Codable, Hashable {
     let timestamp: Date
 
     var status: NoiseStatus { .classify(decibels) }
+    var coordinate: CLLocationCoordinate2D {
+        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+    var hasValidCoordinate: Bool {
+        CLLocationCoordinate2DIsValid(coordinate) && !(latitude == 0 && longitude == 0)
+    }
 }
 
 struct AppNotification: Identifiable, Hashable {
@@ -79,12 +85,4 @@ struct AppNotification: Identifiable, Hashable {
 
 enum AppStage {
     case splash, onboarding, authentication, faceID, main
-}
-
-extension QuietSpot {
-    static let samples: [QuietSpot] = [
-        QuietSpot(id: UUID(), name: "Central Library", latitude: 6.9068, longitude: 79.8700, currentDB: 36, category: .library, distanceKM: 0.4, lastMeasured: .now.addingTimeInterval(-600), measurementCount: 24, verificationTarget: 3, isVerified: true, isFavourite: true, note: "Quiet reading floors and reliable Wi-Fi.", bestTime: "8:00 AM – 10:00 AM"),
-        QuietSpot(id: UUID(), name: "Green Study Garden", latitude: 6.9085, longitude: 79.8664, currentDB: 41, category: .park, distanceKM: 0.8, lastMeasured: .now.addingTimeInterval(-1_800), measurementCount: 2, verificationTarget: 3, isVerified: false, isFavourite: false, note: "Shaded outdoor seating.", bestTime: "7:30 AM – 9:30 AM"),
-        QuietSpot(id: UUID(), name: "Riverside Café", latitude: 6.9037, longitude: 79.8728, currentDB: 54, category: .cafe, distanceKM: 1.2, lastMeasured: .now.addingTimeInterval(-3_600), measurementCount: 13, verificationTarget: 3, isVerified: true, isFavourite: false, note: "Calmer before lunch.", bestTime: "9:00 AM – 11:00 AM")
-    ]
 }

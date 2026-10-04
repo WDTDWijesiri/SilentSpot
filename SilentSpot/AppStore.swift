@@ -4,33 +4,37 @@ import Foundation
 @MainActor
 final class AppStore: ObservableObject {
     @Published var stage: AppStage = .splash
-    @Published var spots: [QuietSpot]
-    @Published var measurements: [NoiseMeasurement]
-    @Published var points = 320
+    @Published var spots: [QuietSpot] = []
+    @Published var measurements: [NoiseMeasurement] = []
+    @Published var inbox: [AppNotification] = []
+    @Published var points = 0
+    @Published var userName = "User"
     @Published var notificationsEnabled = true
     @Published var faceIDEnabled = true
+    @Published var backendError: String?
+    @Published var isBusy = false
 
     private let defaults = UserDefaults.standard
-    private let spotsKey = "silentSpot.spots"
-    private let measurementsKey = "silentSpot.measurements"
-
-    init() {
-        spots = Self.decode([QuietSpot].self, from: UserDefaults.standard.data(forKey: "silentSpot.spots")) ?? QuietSpot.samples
-        measurements = Self.decode([NoiseMeasurement].self, from: UserDefaults.standard.data(forKey: "silentSpot.measurements")) ?? Self.sampleMeasurements
-    }
+    private let firebase = FirebaseService()
+    private var cancellables: Set<AnyCancellable> = []
+    private var didBindFirebase = false
 
     var favourites: [QuietSpot] { spots.filter(\.isFavourite) }
     var verifiedCount: Int { spots.filter(\.isVerified).count }
     var contributionCount: Int { measurements.count }
+    var isFirebaseConfigured: Bool { firebase.isConfigured }
 
-    let inbox: [AppNotification] = [
-        AppNotification(symbol: "bell.fill", title: "Central Library is quiet", message: "Your favourite library is currently measuring 36 dB.", date: .now.addingTimeInterval(-420)),
-        AppNotification(symbol: "trophy.fill", title: "Quiet spot verified", message: "Your submitted spot was verified. You earned +50 points.", date: .now.addingTimeInterval(-7_200)),
-        AppNotification(symbol: "location.fill", title: "You arrived at a study location", message: "Start a 50-minute focus session?", date: .now.addingTimeInterval(-86_400))
-    ]
+    func startFirebase() {
+        firebase.start()
+        bindFirebaseIfNeeded()
+    }
 
     func completeSplash() {
-        stage = defaults.bool(forKey: "silentSpot.onboarded") ? .authentication : .onboarding
+        if firebase.isAuthenticated {
+            stage = .main
+        } else {
+            stage = defaults.bool(forKey: "silentSpot.onboarded") ? .authentication : .onboarding
+        }
     }
 
     func completeOnboarding() {
@@ -38,62 +42,87 @@ final class AppStore: ObservableObject {
         stage = .authentication
     }
 
-    func signIn() { stage = .faceID }
+    func signIn(email: String, password: String) async {
+        await performAuthentication {
+            try await self.firebase.signIn(email: email, password: password)
+        }
+    }
+
+    func signUp(name: String, email: String, password: String) async {
+        await performAuthentication {
+            try await self.firebase.signUp(name: name, email: email, password: password)
+        }
+    }
+
     func finishFaceIDSetup(enabled: Bool) {
         faceIDEnabled = enabled
         stage = .main
     }
 
-    func signOut() { stage = .authentication }
+    func signOut() {
+        do {
+            try firebase.signOut()
+            stage = .authentication
+        } catch {
+            backendError = error.localizedDescription
+        }
+    }
 
-    func saveMeasurement(decibels: Double, locationName: String, latitude: Double, longitude: Double) {
+    func saveMeasurement(decibels: Double, locationName: String, latitude: Double, longitude: Double) async -> Bool {
         let measurement = NoiseMeasurement(id: UUID(), decibels: decibels, latitude: latitude, longitude: longitude, locationName: locationName, timestamp: .now)
-        measurements.insert(measurement, at: 0)
-        points += 10
-        persist()
+        backendError = nil
+        do {
+            try await firebase.saveMeasurement(measurement)
+            return true
+        } catch {
+            backendError = error.localizedDescription
+            return false
+        }
     }
 
     func toggleFavourite(_ spot: QuietSpot) {
-        guard let index = spots.firstIndex(where: { $0.id == spot.id }) else { return }
-        spots[index].isFavourite.toggle()
-        persist()
+        Task { await performBackendWrite { try await self.firebase.setFavourite(spot, isFavourite: !spot.isFavourite) } }
     }
 
     func submitSpot(name: String, category: SpotCategory, note: String, decibels: Double, latitude: Double, longitude: Double) -> QuietSpot {
         let spot = QuietSpot(id: UUID(), name: name, latitude: latitude, longitude: longitude, currentDB: decibels, category: category, distanceKM: 0, lastMeasured: .now, measurementCount: 1, verificationTarget: 3, isVerified: false, isFavourite: false, note: note, bestTime: "Collecting data")
-        spots.insert(spot, at: 0)
-        points += 50
-        persist()
+        Task { await performBackendWrite { try await self.firebase.submitSpot(spot) } }
         return spot
     }
 
-    func contribute(to spot: QuietSpot, decibels: Double) {
-        guard let index = spots.firstIndex(where: { $0.id == spot.id }) else { return }
-        let oldCount = spots[index].measurementCount
-        spots[index].currentDB = ((spots[index].currentDB * Double(oldCount)) + decibels) / Double(oldCount + 1)
-        spots[index].measurementCount += 1
-        spots[index].lastMeasured = .now
-        if spots[index].measurementCount >= spots[index].verificationTarget {
-            spots[index].isVerified = true
-            points += 25
+    func contribute(to spot: QuietSpot, decibels: Double, latitude: Double = 0, longitude: Double = 0) {
+        Task { await performBackendWrite { try await self.firebase.contribute(to: spot, decibels: decibels, latitude: latitude, longitude: longitude) } }
+    }
+
+    private func bindFirebaseIfNeeded() {
+        guard !didBindFirebase else { return }
+        didBindFirebase = true
+        firebase.$spots.assign(to: &$spots)
+        firebase.$measurements.assign(to: &$measurements)
+        firebase.$notifications.assign(to: &$inbox)
+        firebase.$points.assign(to: &$points)
+        firebase.$userName.assign(to: &$userName)
+    }
+
+    private func performAuthentication(_ operation: @escaping () async throws -> Void) async {
+        isBusy = true
+        backendError = nil
+        defer { isBusy = false }
+        do {
+            guard firebase.isConfigured else { throw FirebaseServiceError.notConfigured }
+            try await operation()
+            stage = .faceID
+        } catch {
+            backendError = error.localizedDescription
         }
-        points += 10
-        persist()
     }
 
-    private func persist() {
-        defaults.set(try? JSONEncoder().encode(spots), forKey: spotsKey)
-        defaults.set(try? JSONEncoder().encode(measurements), forKey: measurementsKey)
+    private func performBackendWrite(_ operation: @escaping () async throws -> Void) async {
+        backendError = nil
+        do {
+            try await operation()
+        } catch {
+            backendError = error.localizedDescription
+        }
     }
-
-    private static func decode<T: Decodable>(_ type: T.Type, from data: Data?) -> T? {
-        guard let data else { return nil }
-        return try? JSONDecoder().decode(type, from: data)
-    }
-
-    private static let sampleMeasurements: [NoiseMeasurement] = [
-        NoiseMeasurement(id: UUID(), decibels: 38, latitude: 6.9068, longitude: 79.8700, locationName: "Central Library", timestamp: .now.addingTimeInterval(-1_200)),
-        NoiseMeasurement(id: UUID(), decibels: 46, latitude: 6.9085, longitude: 79.8664, locationName: "Green Study Garden", timestamp: .now.addingTimeInterval(-86_400)),
-        NoiseMeasurement(id: UUID(), decibels: 52, latitude: 6.9037, longitude: 79.8728, locationName: "Riverside Café", timestamp: .now.addingTimeInterval(-172_800))
-    ]
 }

@@ -6,6 +6,12 @@
 	objectVersion = 90;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		F20000000000000000000001 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = F30000000000000000000001 /* FirebaseCore */; };
+		F20000000000000000000002 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = F30000000000000000000002 /* FirebaseAuth */; };
+		F20000000000000000000003 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = F30000000000000000000003 /* FirebaseFirestore */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		000000000000000000000120 /* SilentSpot.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SilentSpot.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -22,6 +28,9 @@
 		000000000000000130000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				F20000000000000000000001 /* FirebaseCore in Frameworks */,
+				F20000000000000000000002 /* FirebaseAuth in Frameworks */,
+				F20000000000000000000003 /* FirebaseFirestore in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -60,6 +69,11 @@
 				000000000000000000000010 /* SilentSpot */,
 			);
 			name = SilentSpot;
+			packageProductDependencies = (
+				F30000000000000000000001 /* FirebaseCore */,
+				F30000000000000000000002 /* FirebaseAuth */,
+				F30000000000000000000003 /* FirebaseFirestore */,
+			);
 			productName = MyApp;
 			productReference = 000000000000000000000120 /* SilentSpot.app */;
 			productType = "com.apple.product-type.application";
@@ -88,6 +102,9 @@
 			);
 			mainGroup = 000000000000000000000001;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				F10000000000000000000001 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+			);
 			preferredProjectObjectVersion = 90;
 			productRefGroup = 000000000000000000000020 /* Products */;
 			projectDirPath = "";
@@ -259,12 +276,16 @@
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Use Face ID to protect your saved places and preferences.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "SilentSpot uses your location to tag measurements and find nearby quiet places.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "SilentSpot uses the microphone to estimate environmental sound level. Audio is never stored.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleDefault;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -299,12 +320,16 @@
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Use Face ID to protect your saved places and preferences.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "SilentSpot uses your location to tag measurements and find nearby quiet places.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "SilentSpot uses the microphone to estimate environmental sound level. Audio is never stored.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleDefault;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -347,6 +372,35 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		F10000000000000000000001 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		F30000000000000000000001 /* FirebaseCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F10000000000000000000001 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCore;
+		};
+		F30000000000000000000002 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F10000000000000000000001 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		F30000000000000000000003 /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F10000000000000000000001 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 000000000000000000000000 /* Project object */;
 }

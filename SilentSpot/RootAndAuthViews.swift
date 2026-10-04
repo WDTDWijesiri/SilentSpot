@@ -94,9 +94,9 @@ struct OnboardingView: View {
 struct AuthenticationView: View {
     @EnvironmentObject private var store: AppStore
     @State private var creatingAccount = false
-    @State private var name = "Thanuja"
-    @State private var email = "student@example.com"
-    @State private var password = "password"
+    @State private var name = ""
+    @State private var email = ""
+    @State private var password = ""
 
     var body: some View {
         NavigationStack {
@@ -114,12 +114,26 @@ struct AuthenticationView: View {
                         .keyboardType(.emailAddress)
                         .textInputAutocapitalization(.never)
                     SecureField("Password", text: $password).textContentType(creatingAccount ? .newPassword : .password)
-                    Button(creatingAccount ? "Create account" : "Sign in") { store.signIn() }
-                        .buttonStyle(PrimaryButtonStyle())
-                    if !creatingAccount {
-                        Button("Continue with Apple", systemImage: "apple.logo") { store.signIn() }
-                            .buttonStyle(SecondaryButtonStyle())
+                    if !store.isFirebaseConfigured {
+                        Label("Add GoogleService-Info.plist to connect this app to Firebase.", systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote)
+                            .foregroundStyle(AppTheme.warning)
                     }
+                    if let backendError = store.backendError {
+                        Text(backendError).font(.footnote).foregroundStyle(.red)
+                    }
+                    Button(creatingAccount ? "Create account" : "Sign in") {
+                        Task {
+                            if creatingAccount {
+                                await store.signUp(name: name, email: email, password: password)
+                            } else {
+                                await store.signIn(email: email, password: password)
+                            }
+                        }
+                    }
+                        .buttonStyle(PrimaryButtonStyle())
+                        .disabled(store.isBusy || !store.isFirebaseConfigured || email.isEmpty || password.count < 6 || (creatingAccount && name.isEmpty))
+                    if store.isBusy { ProgressView().frame(maxWidth: .infinity) }
                     Button(creatingAccount ? "Already have an account? Sign in" : "New to SilentSpot? Create account") {
                         creatingAccount.toggle()
                     }

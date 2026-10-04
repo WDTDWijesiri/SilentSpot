@@ -5,6 +5,7 @@ import SwiftUI
 enum MainTab: Hashable { case home, map, monitor, saved }
 
 struct MainTabView: View {
+    @EnvironmentObject private var store: AppStore
     @State private var selection: MainTab = .home
 
     var body: some View {
@@ -22,6 +23,14 @@ struct MainTabView: View {
                 .tabItem { Label("Saved", systemImage: "heart.fill") }
                 .tag(MainTab.saved)
         }
+        .alert("Database Error", isPresented: Binding(
+            get: { store.backendError != nil },
+            set: { if !$0 { store.backendError = nil } }
+        )) {
+            Button("OK", role: .cancel) { store.backendError = nil }
+        } message: {
+            Text(store.backendError ?? "Unable to complete the Firebase operation.")
+        }
     }
 }
 
@@ -32,6 +41,8 @@ struct HomeView: View {
     @State private var showingReports = false
     @State private var selectedSpot: QuietSpot?
 
+    private var latestMeasurement: NoiseMeasurement? { store.measurements.first }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -39,8 +50,14 @@ struct HomeView: View {
                     AppCard {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("CURRENT NOISE STATUS").font(.caption.weight(.semibold)).foregroundStyle(AppTheme.accent)
-                            Text("Quiet").font(.largeTitle.bold()).foregroundStyle(AppTheme.quiet)
-                            Text("Current Area • 38 dB").foregroundStyle(.secondary)
+                            Text(latestMeasurement?.status.rawValue ?? "No measurement")
+                                .font(.largeTitle.bold())
+                                .foregroundStyle(latestMeasurement?.status.color ?? .secondary)
+                            if let latestMeasurement {
+                                Text("\(latestMeasurement.locationName) • \(latestMeasurement.decibels, specifier: "%.0f") dB").foregroundStyle(.secondary)
+                            } else {
+                                Text("Start a measurement to see the current status.").foregroundStyle(.secondary)
+                            }
                         }
                     }
                     .background(AppTheme.softTeal, in: RoundedRectangle(cornerRadius: 18))
@@ -114,6 +131,8 @@ struct MonitorView: View {
     @EnvironmentObject private var monitor: NoiseMonitor
     @EnvironmentObject private var locationService: LocationService
     @State private var didSave = false
+    @State private var saveFailed = false
+    @State private var locationUnavailable = false
 
     private var status: NoiseStatus { .classify(monitor.decibels) }
 
@@ -121,7 +140,7 @@ struct MonitorView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 18) {
-                    Label("Current Location • NIBM Campus", systemImage: "location.fill")
+                    Label(locationService.location == nil ? "Waiting for current location" : "Current Location", systemImage: "location.fill")
                         .font(.subheadline).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -145,11 +164,22 @@ struct MonitorView: View {
                     .disabled(monitor.isMonitoring)
 
                     Button("Stop & Save", systemImage: "stop.fill") {
-                        let value = monitor.decibels
-                        monitor.stop()
-                        let coordinate = locationService.location?.coordinate
-                        store.saveMeasurement(decibels: value, locationName: "NIBM Campus", latitude: coordinate?.latitude ?? 6.9068, longitude: coordinate?.longitude ?? 79.8700)
-                        didSave = true
+                        Task {
+                            let value = monitor.decibels
+                            monitor.stop()
+                            guard let coordinate = await locationService.waitForLocation()?.coordinate else {
+                                locationUnavailable = true
+                                return
+                            }
+                            let saved = await store.saveMeasurement(
+                                decibels: value,
+                                locationName: "Current Location",
+                                latitude: coordinate.latitude,
+                                longitude: coordinate.longitude
+                            )
+                            didSave = saved
+                            saveFailed = !saved
+                        }
                     }
                     .buttonStyle(SecondaryButtonStyle())
                     .disabled(!monitor.isMonitoring)
@@ -168,9 +198,29 @@ struct MonitorView: View {
                 Text("Location and timestamp were saved. You earned +10 points.")
             }
             .alert("Microphone permission needed", isPresented: $monitor.permissionDenied) {
+                Button("Open Settings") {
+                    if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(settingsURL)
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Allow microphone access in Settings. On Simulator, also select a working audio input device.")
+            }
+            .alert("Could not save measurement", isPresented: $saveFailed) {
                 Button("OK", role: .cancel) {}
             } message: {
-                Text("Allow microphone access in Settings to measure environmental sound levels.")
+                Text(store.backendError ?? "Check your Firebase setup and internet connection, then try again.")
+            }
+            .alert("Location needed", isPresented: $locationUnavailable) {
+                Button("Open Settings") {
+                    if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(settingsURL)
+                    }
+                }
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Allow location access, then monitor again so the saved measurement can appear on the noise map.")
             }
         }
     }

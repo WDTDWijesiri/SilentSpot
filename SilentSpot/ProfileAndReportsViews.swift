@@ -12,9 +12,12 @@ struct ReportsView: View {
         var id: Self { self }
     }
 
-    private let chartData = [
-        ("Mon", 38.0), ("Tue", 43), ("Wed", 51), ("Thu", 41), ("Fri", 47), ("Sat", 35), ("Sun", 39)
-    ]
+    private var chartData: [NoiseMeasurement] { Array(store.measurements.prefix(14).reversed()) }
+    private var averageNoise: Double {
+        guard !store.measurements.isEmpty else { return 0 }
+        return store.measurements.map(\.decibels).reduce(0, +) / Double(store.measurements.count)
+    }
+    private var quietestMeasurement: NoiseMeasurement? { store.measurements.min(by: { $0.decibels < $1.decibels }) }
 
     var body: some View {
         ScrollView {
@@ -25,19 +28,19 @@ struct ReportsView: View {
                 .pickerStyle(.segmented)
 
                 HStack(spacing: 10) {
-                    MetricCard(value: "43 dB", label: "Average noise")
-                    MetricCard(value: "Library", label: "Quietest place")
-                    MetricCard(value: "8–10 AM", label: "Quietest time")
+                    MetricCard(value: store.measurements.isEmpty ? "—" : averageNoise.formatted(.number.precision(.fractionLength(0))) + " dB", label: "Average noise")
+                    MetricCard(value: quietestMeasurement?.locationName ?? "—", label: "Quietest place")
+                    MetricCard(value: quietestMeasurement?.timestamp.formatted(date: .omitted, time: .shortened) ?? "—", label: "Quietest time")
                 }
 
                 AppCard {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Noise history").font(.headline)
-                        Chart(chartData, id: \.0) { day, value in
-                            LineMark(x: .value("Day", day), y: .value("dB", value))
+                        Chart(chartData) { measurement in
+                            LineMark(x: .value("Time", measurement.timestamp), y: .value("dB", measurement.decibels))
                                 .foregroundStyle(AppTheme.accent)
-                            PointMark(x: .value("Day", day), y: .value("dB", value))
-                                .foregroundStyle(NoiseStatus.classify(value).color)
+                            PointMark(x: .value("Time", measurement.timestamp), y: .value("dB", measurement.decibels))
+                                .foregroundStyle(measurement.status.color)
                         }
                         .chartYScale(domain: 25...75)
                         .frame(height: 210)
@@ -98,7 +101,7 @@ struct ProfileView: View {
                     HStack(spacing: 14) {
                         Image(systemName: "person.crop.circle.fill").font(.system(size: 58)).foregroundStyle(AppTheme.accent)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Thanuja").font(.title2.bold())
+                            Text(store.userName).font(.title2.bold())
                             Text("Community Level: Quiet Explorer").font(.footnote).foregroundStyle(.secondary)
                             Label("\(store.points) Points", systemImage: "star.fill").font(.subheadline.weight(.semibold)).foregroundStyle(AppTheme.warning)
                         }
@@ -185,7 +188,7 @@ struct SettingsView: View {
                 HStack {
                     Image(systemName: "person.crop.circle.fill").font(.largeTitle).foregroundStyle(AppTheme.accent)
                     VStack(alignment: .leading) {
-                        Text("Thanuja").font(.headline)
+                        Text(store.userName).font(.headline)
                         Text("\(store.points) points • Quiet Explorer").font(.caption).foregroundStyle(.secondary)
                     }
                 }
