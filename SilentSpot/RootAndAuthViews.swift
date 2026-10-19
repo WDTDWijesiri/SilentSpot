@@ -10,6 +10,7 @@ struct RootView: View {
             case .onboarding: OnboardingView()
             case .authentication: AuthenticationView()
             case .faceID: FaceIDSetupView()
+            case .faceIDUnlock: FaceIDUnlockView()
             case .main: MainTabView()
             }
         }
@@ -133,6 +134,13 @@ struct AuthenticationView: View {
                     }
                         .buttonStyle(PrimaryButtonStyle())
                         .disabled(store.isBusy || !store.isFirebaseConfigured || email.isEmpty || password.count < 6 || (creatingAccount && name.isEmpty))
+                    if !creatingAccount && store.canSignInWithFaceID {
+                        Button("Sign in with Face ID", systemImage: "faceid") {
+                            Task { await store.signInWithFaceID() }
+                        }
+                        .buttonStyle(SecondaryButtonStyle())
+                        .disabled(store.isBusy || !store.isFirebaseConfigured)
+                    }
                     if store.isBusy { ProgressView().frame(maxWidth: .infinity) }
                     Button(creatingAccount ? "Already have an account? Sign in" : "New to SilentSpot? Create account") {
                         creatingAccount.toggle()
@@ -175,5 +183,43 @@ struct FaceIDSetupView: View {
         }
         .padding(20)
         .background(AppTheme.background.ignoresSafeArea())
+    }
+}
+
+struct FaceIDUnlockView: View {
+    @EnvironmentObject private var store: AppStore
+    @State private var authenticating = false
+    @State private var failed = false
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Spacer()
+            Image(systemName: "faceid")
+                .font(.system(size: 108))
+                .foregroundStyle(AppTheme.accent)
+            Text("Unlock SilentSpot").font(.largeTitle.bold())
+            Text("Use Face ID to access your saved quiet places and reports.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+            if failed { Text("Face ID could not verify you. Try again.").foregroundStyle(.red) }
+            Spacer()
+            Button(authenticating ? "Checking Face ID…" : "Unlock with Face ID") {
+                authenticating = true
+                Task {
+                    failed = !(await store.unlockWithFaceID())
+                    authenticating = false
+                }
+            }
+            .buttonStyle(PrimaryButtonStyle())
+            .disabled(authenticating)
+            Button("Sign out", role: .destructive) { store.signOut() }
+        }
+        .padding(24)
+        .background(AppTheme.background.ignoresSafeArea())
+        .task {
+            authenticating = true
+            failed = !(await store.unlockWithFaceID())
+            authenticating = false
+        }
     }
 }

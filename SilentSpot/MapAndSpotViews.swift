@@ -1,3 +1,4 @@
+import Charts
 import MapKit
 import SwiftUI
 
@@ -90,7 +91,12 @@ struct NoiseMapView: View {
     }
 
     private func focusLatestMeasurement() {
-        guard let measurement = store.measurements.first(where: \.hasValidCoordinate) else { return }
+        guard let measurement = store.measurements.first(where: \.hasValidCoordinate) else {
+            if let coordinate = locationService.location?.coordinate {
+                position = .region(.init(center: coordinate, span: .init(latitudeDelta: 0.012, longitudeDelta: 0.012)))
+            }
+            return
+        }
         selectedSpot = nil
         selectedMeasurement = measurement
         position = .region(.init(
@@ -147,6 +153,7 @@ private struct MapSpotCard: View {
 
 struct QuietSpotFinderView: View {
     @EnvironmentObject private var store: AppStore
+    @EnvironmentObject private var locationService: LocationService
     @State private var query = ""
     @State private var quietOnly = true
     @State private var verifiedOnly = false
@@ -156,6 +163,9 @@ struct QuietSpotFinderView: View {
             (query.isEmpty || spot.name.localizedCaseInsensitiveContains(query)) &&
             (!quietOnly || spot.status == .quiet) &&
             (!verifiedOnly || spot.isVerified)
+        }.sorted {
+            ($0.distance(from: locationService.location) ?? .greatestFiniteMagnitude) <
+            ($1.distance(from: locationService.location) ?? .greatestFiniteMagnitude)
         }
     }
 
@@ -177,11 +187,18 @@ struct QuietSpotFinderView: View {
 
 struct SpotDetailsView: View {
     @EnvironmentObject private var store: AppStore
+    @EnvironmentObject private var locationService: LocationService
     let spot: QuietSpot
     @State private var showingMonitor = false
     @State private var showingVerification = false
 
     private var currentSpot: QuietSpot { store.spots.first(where: { $0.id == spot.id }) ?? spot }
+    private var spotMeasurements: [NoiseMeasurement] {
+        store.communityMeasurements.filter { $0.spotID == currentSpot.id || $0.locationName == currentSpot.name }
+    }
+    private var recommendation: BestTimeRecommendation? {
+        BestTimeRecommendation.calculate(for: currentSpot, from: store.communityMeasurements)
+    }
 
     var body: some View {
         ScrollView {
@@ -197,13 +214,21 @@ struct SpotDetailsView: View {
 
                 AppCard {
                     VStack(spacing: 14) {
-                        DetailRow(symbol: "location.fill", title: "Distance", value: currentSpot.distanceKM.formatted(.number.precision(.fractionLength(1))) + " km")
-                        DetailRow(symbol: "clock.fill", title: "Best Time", value: currentSpot.bestTime)
+                        DetailRow(symbol: "location.fill", title: "Distance", value: (currentSpot.distance(from: locationService.location) ?? currentSpot.distanceKM).formatted(.number.precision(.fractionLength(1))) + " km")
+                        DetailRow(symbol: "clock.fill", title: "Best Time", value: recommendation?.timeRange ?? "Collecting data")
                         DetailRow(symbol: "person.3.fill", title: "Community Measurements", value: "\(currentSpot.measurementCount)")
                     }
                 }
 
-                NoiseMiniChart(measurements: store.measurements.filter { $0.locationName == currentSpot.name })
+                NoiseMiniChart(measurements: spotMeasurements)
+
+                NavigationLink {
+                    BestTimeView(spot: currentSpot, measurements: spotMeasurements)
+                } label: {
+                    Label("Best Time to Visit", systemImage: "clock.badge.checkmark.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(SecondaryButtonStyle())
 
                 Button("Measure Noise", systemImage: "waveform") { showingMonitor = true }
                     .buttonStyle(PrimaryButtonStyle())
@@ -223,6 +248,76 @@ struct SpotDetailsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showingMonitor) { NavigationStack { MonitorView() } }
         .sheet(isPresented: $showingVerification) { CommunityVerificationView(spot: currentSpot) }
+    }
+}
+
+struct BestTimeView: View {
+    let spot: QuietSpot
+    let measurements: [NoiseMeasurement]
+
+    private struct HourlyAverage: Identifiable {
+        let hour: Int
+        let average: Double
+        let count: Int
+        var id: Int { hour }
+        var label: String {
+            let date = Calendar.current.date(from: DateComponents(hour: hour)) ?? .now
+            return date.formatted(.dateTime.hour())
+        }
+    }
+
+    private var hourlyAverages: [HourlyAverage] {
+        Dictionary(grouping: measurements) { Calendar.current.component(.hour, from: $0.timestamp) }
+            .map { hour, values in
+                HourlyAverage(hour: hour, average: values.map(\.decibels).reduce(0, +) / Double(values.count), count: values.count)
+            }
+            .sorted { $0.hour < $1.hour }
+    }
+    private var recommendation: BestTimeRecommendation? {
+        BestTimeRecommendation.calculate(for: spot, from: measurements)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                AppCard {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(spot.name).font(.title2.bold())
+                        Text("RECOMMENDED QUIET PERIOD").font(.caption.bold()).foregroundStyle(AppTheme.accent)
+                        Text(recommendation?.timeRange ?? "Collecting more data")
+                            .font(.largeTitle.bold())
+                        if let recommendation {
+                            Text("Average \(recommendation.averageDB, specifier: "%.0f") dB from \(recommendation.sampleCount) community reading\(recommendation.sampleCount == 1 ? "" : "s").")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Contribute measurements at different times to unlock a recommendation.")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                AppCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Noise by hour").font(.headline)
+                        if hourlyAverages.isEmpty {
+                            ContentUnavailableView("No history yet", systemImage: "clock.arrow.circlepath")
+                                .frame(height: 220)
+                        } else {
+                            Chart(hourlyAverages) { item in
+                                BarMark(x: .value("Hour", item.label), y: .value("Average dB", item.average))
+                                    .foregroundStyle(NoiseStatus.classify(item.average).color)
+                            }
+                            .chartYScale(domain: 25...100)
+                            .frame(height: 240)
+                        }
+                    }
+                }
+            }
+            .padding()
+        }
+        .background(AppTheme.background)
+        .navigationTitle("Best Time to Visit")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -407,6 +502,24 @@ struct AddQuietSpotView: View {
             } message: {
                 Text("A current location is required before this quiet spot can be submitted.")
             }
+            .alert("Microphone permission needed", isPresented: $monitor.permissionDenied) {
+                Button("Open Settings") {
+                    if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(settingsURL)
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Allow microphone access in Settings to measure environmental noise.")
+            }
+            .alert("Microphone could not start", isPresented: Binding(
+                get: { monitor.audioErrorMessage != nil },
+                set: { if !$0 { monitor.audioErrorMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) { monitor.audioErrorMessage = nil }
+            } message: {
+                Text(monitor.audioErrorMessage ?? "Try again.")
+            }
             .onAppear { locationService.requestPermission() }
         }
     }
@@ -418,6 +531,8 @@ struct CommunityVerificationView: View {
     @EnvironmentObject private var monitor: NoiseMonitor
     @EnvironmentObject private var locationService: LocationService
     let spot: QuietSpot
+    @State private var verificationError: String?
+    @State private var contributionSaved = false
 
     private var currentSpot: QuietSpot { store.spots.first(where: { $0.id == spot.id }) ?? spot }
     private var progress: Double { min(1, Double(currentSpot.measurementCount) / Double(currentSpot.verificationTarget)) }
@@ -445,10 +560,27 @@ struct CommunityVerificationView: View {
                     }
                     Button(monitor.isMonitoring ? "Stop & Contribute" : "Start Measurement", systemImage: monitor.isMonitoring ? "stop.fill" : "waveform") {
                         if monitor.isMonitoring {
-                            let coordinate = locationService.location?.coordinate
                             let value = monitor.decibels
                             monitor.stop()
-                            store.contribute(to: currentSpot, decibels: value, latitude: coordinate?.latitude ?? 0, longitude: coordinate?.longitude ?? 0)
+                            Task {
+                                guard let userLocation = await locationService.waitForLocation() else {
+                                    verificationError = "A current GPS location is required to verify this spot."
+                                    return
+                                }
+                                let spotLocation = CLLocation(latitude: currentSpot.latitude, longitude: currentSpot.longitude)
+                                guard userLocation.distance(from: spotLocation) <= 200 else {
+                                    verificationError = "You must be within 200 metres of this quiet spot to contribute a verification measurement."
+                                    return
+                                }
+                                let saved = await store.contribute(
+                                    to: currentSpot,
+                                    decibels: value,
+                                    latitude: userLocation.coordinate.latitude,
+                                    longitude: userLocation.coordinate.longitude
+                                )
+                                contributionSaved = saved
+                                if !saved { verificationError = store.backendError }
+                            }
                         } else {
                             locationService.requestPermission()
                             Task { await monitor.start() }
@@ -464,6 +596,19 @@ struct CommunityVerificationView: View {
             .navigationTitle("Community Verification")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .alert("Verification unavailable", isPresented: Binding(
+                get: { verificationError != nil },
+                set: { if !$0 { verificationError = nil } }
+            )) {
+                Button("OK", role: .cancel) { verificationError = nil }
+            } message: {
+                Text(verificationError ?? "Try again.")
+            }
+            .alert("Contribution saved", isPresented: $contributionSaved) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Your nearby measurement was added to the community verification count.")
+            }
         }
     }
 }

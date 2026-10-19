@@ -8,7 +8,8 @@ service cloud.firestore {
       allow create, read: if owns(userId);
       allow update: if owns(userId)
         && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['name', 'points', 'favouriteSpotIDs']);
+          .hasOnly(['name', 'points', 'lifetimePoints', 'favouriteSpotIDs',
+                    'purchasedRewardIDs', 'equippedRewardID']);
       allow delete: if owns(userId);
 
       match /measurements/{measurementId} {
@@ -18,7 +19,9 @@ service cloud.firestore {
 
       match /notifications/{notificationId} {
         allow read: if owns(userId);
-        allow write: if false;
+        allow create: if owns(userId)
+          && request.resource.data.userID == request.auth.uid;
+        allow update, delete: if false;
       }
     }
 
@@ -27,7 +30,7 @@ service cloud.firestore {
       allow create: if signedIn() && request.resource.data.submittedBy == request.auth.uid;
       allow update: if signedIn()
         && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['currentDB', 'measurementCount', 'lastMeasured', 'isVerified']);
+          .hasOnly(['currentDB', 'measurementCount', 'lastMeasured', 'isVerified', 'contributorIDs']);
       allow delete: if signedIn() && resource.data.submittedBy == request.auth.uid;
     }
 

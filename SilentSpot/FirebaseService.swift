@@ -10,13 +10,18 @@ final class FirebaseService: ObservableObject {
     @Published private(set) var isAuthenticated = false
     @Published private(set) var spots: [QuietSpot] = []
     @Published private(set) var measurements: [NoiseMeasurement] = []
+    @Published private(set) var communityMeasurements: [NoiseMeasurement] = []
     @Published private(set) var notifications: [AppNotification] = []
     @Published private(set) var points = 0
+    @Published private(set) var lifetimePoints = 0
+    @Published private(set) var purchasedRewardIDs: Set<String> = []
+    @Published private(set) var equippedRewardID: String?
     @Published private(set) var userName = "User"
     @Published private(set) var favouriteIDs: Set<UUID> = []
 
     private var listeners: [ListenerRegistration] = []
     private var authHandle: AuthStateDidChangeListenerHandle?
+    private var currentUserID: String?
 
     func start() {
         guard FirebaseApp.app() != nil else {
@@ -46,6 +51,8 @@ final class FirebaseService: ObservableObject {
             "name": name,
             "email": email,
             "points": 0,
+            "lifetimePoints": 0,
+            "purchasedRewardIDs": [],
             "favouriteSpotIDs": [],
             "createdAt": FieldValue.serverTimestamp()
         ])
@@ -63,7 +70,10 @@ final class FirebaseService: ObservableObject {
         let batch = database.batch()
         batch.setData(data, forDocument: database.collection("measurements").document(measurement.id.uuidString))
         batch.setData(data, forDocument: database.collection("users").document(uid).collection("measurements").document(measurement.id.uuidString))
-        batch.updateData(["points": FieldValue.increment(Int64(10))], forDocument: database.collection("users").document(uid))
+        batch.updateData([
+            "points": FieldValue.increment(Int64(10)),
+            "lifetimePoints": FieldValue.increment(Int64(10))
+        ], forDocument: database.collection("users").document(uid))
         try await batch.commit()
     }
 
@@ -72,46 +82,77 @@ final class FirebaseService: ObservableObject {
         var data = spotData(spot)
         data["submittedBy"] = uid
         data["submittedByName"] = userName
+        data["contributorIDs"] = [uid]
         let database = Firestore.firestore()
         let batch = database.batch()
         batch.setData(data, forDocument: database.collection("quietSpots").document(spot.id.uuidString))
-        batch.updateData(["points": FieldValue.increment(Int64(50))], forDocument: database.collection("users").document(uid))
+        batch.updateData([
+            "points": FieldValue.increment(Int64(50)),
+            "lifetimePoints": FieldValue.increment(Int64(50))
+        ], forDocument: database.collection("users").document(uid))
         try await batch.commit()
     }
 
-    func contribute(to spot: QuietSpot, decibels: Double, latitude: Double, longitude: Double) async throws {
+    func contribute(to spot: QuietSpot, decibels: Double, latitude: Double, longitude: Double) async throws -> Bool {
         let uid = try userID()
         let database = Firestore.firestore()
         let spotReference = database.collection("quietSpots").document(spot.id.uuidString)
-        let measurement = NoiseMeasurement(id: UUID(), decibels: decibels, latitude: latitude, longitude: longitude, locationName: spot.name, timestamp: .now)
+        let measurement = NoiseMeasurement(id: UUID(), decibels: decibels, latitude: latitude, longitude: longitude, locationName: spot.name, timestamp: .now, spotID: spot.id)
         let measurementReference = database.collection("measurements").document(measurement.id.uuidString)
         let userMeasurementReference = database.collection("users").document(uid).collection("measurements").document(measurement.id.uuidString)
         let userReference = database.collection("users").document(uid)
 
-        _ = try await database.runTransaction { transaction, errorPointer in
+        let result = try await database.runTransaction { transaction, errorPointer in
             do {
                 let snapshot = try transaction.getDocument(spotReference)
+                let contributorIDs = snapshot.data()?["contributorIDs"] as? [String] ?? []
+                let submittedBy = snapshot.data()?["submittedBy"] as? String
+                guard submittedBy != uid, !contributorIDs.contains(uid) else {
+                    throw FirebaseServiceError.alreadyContributed
+                }
                 let oldCount = snapshot.data()?["measurementCount"] as? Int ?? 0
                 let oldDB = snapshot.data()?["currentDB"] as? Double ?? decibels
                 let newCount = oldCount + 1
                 let newDB = ((oldDB * Double(oldCount)) + decibels) / Double(max(newCount, 1))
-                let becameVerified = newCount >= (snapshot.data()?["verificationTarget"] as? Int ?? 3)
+                let wasVerified = snapshot.data()?["isVerified"] as? Bool ?? false
+                let isNowVerified = wasVerified || newCount >= (snapshot.data()?["verificationTarget"] as? Int ?? 3)
+                let becameVerified = !wasVerified && isNowVerified
                 transaction.updateData([
                     "currentDB": newDB,
                     "measurementCount": newCount,
                     "lastMeasured": Timestamp(date: .now),
-                    "isVerified": becameVerified
+                    "isVerified": isNowVerified,
+                    "contributorIDs": FieldValue.arrayUnion([uid])
                 ], forDocument: spotReference)
                 let data = self.measurementData(measurement, userID: uid, spotID: spot.id)
                 transaction.setData(data, forDocument: measurementReference)
                 transaction.setData(data, forDocument: userMeasurementReference)
-                transaction.updateData(["points": FieldValue.increment(Int64(becameVerified ? 35 : 10))], forDocument: userReference)
-                return nil
+                let earnedPoints = Int64(becameVerified ? 35 : 10)
+                transaction.updateData([
+                    "points": FieldValue.increment(earnedPoints),
+                    "lifetimePoints": FieldValue.increment(earnedPoints)
+                ], forDocument: userReference)
+                return becameVerified
             } catch {
                 errorPointer?.pointee = error as NSError
                 return nil
             }
         }
+        return result as? Bool ?? false
+    }
+
+    func saveNotification(_ notification: AppNotification) async throws {
+        let uid = try userID()
+        try await Firestore.firestore()
+            .collection("users").document(uid)
+            .collection("notifications").document(notification.id.uuidString)
+            .setData([
+                "userID": uid,
+                "symbol": notification.symbol,
+                "title": notification.title,
+                "message": notification.message,
+                "date": Timestamp(date: notification.date)
+            ])
     }
 
     func setFavourite(_ spot: QuietSpot, isFavourite: Bool) async throws {
@@ -120,7 +161,48 @@ final class FirebaseService: ObservableObject {
         try await Firestore.firestore().collection("users").document(uid).updateData(["favouriteSpotIDs": value])
     }
 
+    func purchaseReward(_ reward: RewardItem) async throws {
+        let uid = try userID()
+        let database = Firestore.firestore()
+        let userReference = database.collection("users").document(uid)
+
+        _ = try await database.runTransaction { transaction, errorPointer in
+            do {
+                let snapshot = try transaction.getDocument(userReference)
+                let data = snapshot.data() ?? [:]
+                let balance = data["points"] as? Int ?? 0
+                let purchased = data["purchasedRewardIDs"] as? [String] ?? []
+                guard !purchased.contains(reward.id) else {
+                    throw FirebaseServiceError.rewardAlreadyPurchased
+                }
+                guard balance >= reward.cost else {
+                    throw FirebaseServiceError.insufficientPoints(required: reward.cost, available: balance)
+                }
+                transaction.updateData([
+                    "points": balance - reward.cost,
+                    "purchasedRewardIDs": FieldValue.arrayUnion([reward.id]),
+                    "equippedRewardID": reward.id
+                ], forDocument: userReference)
+                return true
+            } catch {
+                errorPointer?.pointee = error as NSError
+                return nil
+            }
+        }
+    }
+
+    func equipReward(_ reward: RewardItem) async throws {
+        let uid = try userID()
+        guard purchasedRewardIDs.contains(reward.id) else {
+            throw FirebaseServiceError.rewardNotOwned
+        }
+        try await Firestore.firestore().collection("users").document(uid).updateData([
+            "equippedRewardID": reward.id
+        ])
+    }
+
     private func listen(for uid: String) {
+        currentUserID = uid
         listeners.forEach { $0.remove() }
         listeners.removeAll()
         let database = Firestore.firestore()
@@ -130,6 +212,9 @@ final class FirebaseService: ObservableObject {
                 guard let self, let data = snapshot?.data() else { return }
                 self.userName = data["name"] as? String ?? "User"
                 self.points = data["points"] as? Int ?? 0
+                self.lifetimePoints = data["lifetimePoints"] as? Int ?? self.points
+                self.purchasedRewardIDs = Set(data["purchasedRewardIDs"] as? [String] ?? [])
+                self.equippedRewardID = data["equippedRewardID"] as? String
                 self.favouriteIDs = Set((data["favouriteSpotIDs"] as? [String] ?? []).compactMap(UUID.init(uuidString:)))
                 self.applyFavouriteState()
             }
@@ -146,6 +231,12 @@ final class FirebaseService: ObservableObject {
         listeners.append(database.collection("users").document(uid).collection("measurements").order(by: "timestamp", descending: true).addSnapshotListener { [weak self] snapshot, _ in
             Task { @MainActor in
                 self?.measurements = snapshot?.documents.compactMap { self?.decodeMeasurement($0) } ?? []
+            }
+        })
+
+        listeners.append(database.collection("measurements").order(by: "timestamp", descending: true).limit(to: 500).addSnapshotListener { [weak self] snapshot, _ in
+            Task { @MainActor in
+                self?.communityMeasurements = snapshot?.documents.compactMap { self?.decodeMeasurement($0) } ?? []
             }
         })
 
@@ -192,7 +283,8 @@ final class FirebaseService: ObservableObject {
             isVerified: data["isVerified"] as? Bool ?? false,
             isFavourite: favouriteIDs.contains(id),
             note: data["note"] as? String ?? "",
-            bestTime: data["bestTime"] as? String ?? "Collecting data"
+            bestTime: data["bestTime"] as? String ?? "Collecting data",
+            isSubmittedByCurrentUser: data["submittedBy"] as? String == currentUserID
         )
     }
 
@@ -205,7 +297,8 @@ final class FirebaseService: ObservableObject {
             latitude: data["latitude"] as? Double ?? 0,
             longitude: data["longitude"] as? Double ?? 0,
             locationName: data["locationName"] as? String ?? "Current Location",
-            timestamp: (data["timestamp"] as? Timestamp)?.dateValue() ?? .now
+            timestamp: (data["timestamp"] as? Timestamp)?.dateValue() ?? .now,
+            spotID: (data["spotID"] as? String).flatMap(UUID.init(uuidString:))
         )
     }
 
@@ -254,20 +347,33 @@ final class FirebaseService: ObservableObject {
         listeners.removeAll()
         spots = []
         measurements = []
+        communityMeasurements = []
         notifications = []
         points = 0
+        lifetimePoints = 0
+        purchasedRewardIDs = []
+        equippedRewardID = nil
         favouriteIDs = []
+        currentUserID = nil
     }
 }
 
 enum FirebaseServiceError: LocalizedError {
     case notConfigured
     case notAuthenticated
+    case alreadyContributed
+    case insufficientPoints(required: Int, available: Int)
+    case rewardAlreadyPurchased
+    case rewardNotOwned
 
     var errorDescription: String? {
         switch self {
         case .notConfigured: "Firebase is not configured. Add GoogleService-Info.plist to the SilentSpot target."
         case .notAuthenticated: "Sign in before accessing community data."
+        case .alreadyContributed: "You already contributed a verification measurement for this spot. Another community member must verify it."
+        case let .insufficientPoints(required, available): "You need \(required) points for this reward. Your current balance is \(available)."
+        case .rewardAlreadyPurchased: "This reward is already unlocked."
+        case .rewardNotOwned: "Purchase this reward before equipping it."
         }
     }
 }

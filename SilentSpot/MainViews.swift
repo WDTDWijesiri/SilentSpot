@@ -6,6 +6,7 @@ enum MainTab: Hashable { case home, map, monitor, saved }
 
 struct MainTabView: View {
     @EnvironmentObject private var store: AppStore
+    @EnvironmentObject private var locationService: LocationService
     @State private var selection: MainTab = .home
 
     var body: some View {
@@ -31,11 +32,29 @@ struct MainTabView: View {
         } message: {
             Text(store.backendError ?? "Unable to complete the Firebase operation.")
         }
+        .alert(item: $locationService.focusPrompt) { prompt in
+            Alert(
+                title: Text("Focus zone reached"),
+                message: Text("You arrived at \(prompt.spotName). Start a focused study session?"),
+                primaryButton: .default(Text("Start Focus")) { store.recordFocusArrival(prompt) },
+                secondaryButton: .cancel()
+            )
+        }
+        .onAppear {
+            locationService.syncFocusZones(spots: store.favourites, enabled: store.focusZonesEnabled)
+        }
+        .onChange(of: store.favourites.map(\.id)) { _, _ in
+            locationService.syncFocusZones(spots: store.favourites, enabled: store.focusZonesEnabled)
+        }
+        .onChange(of: store.focusZonesEnabled) { _, enabled in
+            locationService.syncFocusZones(spots: store.favourites, enabled: enabled)
+        }
     }
 }
 
 struct HomeView: View {
     @EnvironmentObject private var store: AppStore
+    @EnvironmentObject private var locationService: LocationService
     @Binding var selection: MainTab
     @State private var showingProfile = false
     @State private var showingReports = false
@@ -72,13 +91,16 @@ struct HomeView: View {
                         QuickAction(title: "Recent Activity", symbol: "chart.xyaxis.line") { showingReports = true }
                     }
 
-                    if let nearby = store.spots.first {
+                    if let nearby = store.spots.min(by: {
+                        ($0.distance(from: locationService.location) ?? .greatestFiniteMagnitude) <
+                        ($1.distance(from: locationService.location) ?? .greatestFiniteMagnitude)
+                    }) {
                         Button { selectedSpot = nearby } label: {
                             HStack(spacing: 12) {
                                 Image(systemName: "location.circle.fill").font(.title2).foregroundStyle(AppTheme.quiet)
                                 VStack(alignment: .leading) {
                                     Text(nearby.name).font(.headline).foregroundStyle(.primary)
-                                    Text("Nearby • \(nearby.status.rawValue) • \(nearby.distanceKM, specifier: "%.1f") km")
+                                    Text("Nearby • \(nearby.status.rawValue) • \((nearby.distance(from: locationService.location) ?? nearby.distanceKM), specifier: "%.1f") km")
                                         .font(.footnote).foregroundStyle(.secondary)
                                 }
                                 Spacer()
@@ -133,6 +155,7 @@ struct MonitorView: View {
     @State private var didSave = false
     @State private var saveFailed = false
     @State private var locationUnavailable = false
+    @State private var pendingDecibels: Double?
 
     private var status: NoiseStatus { .classify(monitor.decibels) }
 
@@ -140,7 +163,7 @@ struct MonitorView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 18) {
-                    Label(locationService.location == nil ? "Waiting for current location" : "Current Location", systemImage: "location.fill")
+                    Label(locationStatusText, systemImage: locationService.location == nil ? "location.slash" : "location.fill")
                         .font(.subheadline).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -168,6 +191,7 @@ struct MonitorView: View {
                             let value = monitor.decibels
                             monitor.stop()
                             guard let coordinate = await locationService.waitForLocation()?.coordinate else {
+                                pendingDecibels = value
                                 locationUnavailable = true
                                 return
                             }
@@ -179,6 +203,7 @@ struct MonitorView: View {
                             )
                             didSave = saved
                             saveFailed = !saved
+                            if saved { pendingDecibels = nil }
                         }
                     }
                     .buttonStyle(SecondaryButtonStyle())
@@ -205,7 +230,15 @@ struct MonitorView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Allow microphone access in Settings. On Simulator, also select a working audio input device.")
+                Text("Allow microphone access in Settings to measure environmental noise.")
+            }
+            .alert("Microphone could not start", isPresented: Binding(
+                get: { monitor.audioErrorMessage != nil },
+                set: { if !$0 { monitor.audioErrorMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) { monitor.audioErrorMessage = nil }
+            } message: {
+                Text(monitor.audioErrorMessage ?? "Try again.")
             }
             .alert("Could not save measurement", isPresented: $saveFailed) {
                 Button("OK", role: .cancel) {}
@@ -213,6 +246,9 @@ struct MonitorView: View {
                 Text(store.backendError ?? "Check your Firebase setup and internet connection, then try again.")
             }
             .alert("Location needed", isPresented: $locationUnavailable) {
+                Button("Try Again") {
+                    Task { await retryPendingSave() }
+                }
                 Button("Open Settings") {
                     if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
                         UIApplication.shared.open(settingsURL)
@@ -220,9 +256,37 @@ struct MonitorView: View {
                 }
                 Button("OK", role: .cancel) {}
             } message: {
-                Text("Allow location access, then monitor again so the saved measurement can appear on the noise map.")
+                Text(locationService.locationErrorMessage ?? "SilentSpot is still acquiring the current GPS location.")
             }
+            .task { locationService.requestPermission() }
         }
+    }
+
+    private var locationStatusText: String {
+        if locationService.location != nil { return "Current location ready" }
+        switch locationService.authorizationStatus {
+        case .authorizedAlways, .authorizedWhenInUse: return "Acquiring GPS location…"
+        case .denied, .restricted: return "Location access unavailable"
+        case .notDetermined: return "Location permission not requested"
+        @unknown default: return "Waiting for current location"
+        }
+    }
+
+    private func retryPendingSave() async {
+        guard let value = pendingDecibels,
+              let coordinate = await locationService.waitForLocation()?.coordinate else {
+            locationUnavailable = true
+            return
+        }
+        let saved = await store.saveMeasurement(
+            decibels: value,
+            locationName: "Current Location",
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude
+        )
+        didSave = saved
+        saveFailed = !saved
+        if saved { pendingDecibels = nil }
     }
 }
 
@@ -248,6 +312,7 @@ struct FavouritesView: View {
 }
 
 struct SpotRow: View {
+    @EnvironmentObject private var locationService: LocationService
     let spot: QuietSpot
     var body: some View {
         HStack(spacing: 12) {
@@ -257,7 +322,7 @@ struct SpotRow: View {
                 .background(spot.status.color.opacity(0.12), in: Circle())
             VStack(alignment: .leading, spacing: 3) {
                 Text(spot.name).font(.headline)
-                Text("\(spot.currentDB, specifier: "%.0f") dB • \(spot.status.rawValue) • \(spot.distanceKM, specifier: "%.1f") km")
+                Text("\(spot.currentDB, specifier: "%.0f") dB • \(spot.status.rawValue) • \((spot.distance(from: locationService.location) ?? spot.distanceKM), specifier: "%.1f") km")
                     .font(.footnote).foregroundStyle(.secondary)
             }
         }

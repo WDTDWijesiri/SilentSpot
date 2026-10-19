@@ -11,6 +11,8 @@ The app code now uses Firebase Authentication and Cloud Firestore. It intentiona
 7. Publish the included `firestore.rules` file using Firebase CLI or paste its contents into Firestore Rules.
 8. Build and run the app. Create the first account from the Sign Up screen.
 
+Re-publish `firestore.rules` after this feature update. The current rules add authenticated in-app notification creation and the `contributorIDs` field used to prevent the same user from verifying a quiet spot more than once.
+
 The Swift Package Manager dependency is already configured for `FirebaseCore`, `FirebaseAuth`, and `FirebaseFirestore`.
 
 For a production reward system, move point awards and verification thresholds to trusted Cloud Functions. The coursework MVP currently performs those writes from the authenticated client and restricts them with Firestore rules.

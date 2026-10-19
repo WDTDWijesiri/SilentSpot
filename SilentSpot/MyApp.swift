@@ -25,7 +25,16 @@ struct MyApp: App {
                 .environmentObject(locationService)
                 .environmentObject(noiseMonitor)
                 .tint(Color("AccentColor"))
+                .preferredColorScheme(preferredColorScheme)
                 .task { store.startFirebase() }
+        }
+    }
+
+    private var preferredColorScheme: ColorScheme? {
+        switch store.appearance {
+        case .system: nil
+        case .light: .light
+        case .dark: .dark
         }
     }
 }

@@ -267,6 +267,7 @@
 		000000000000000111000000 /* Debug configuration for PBXNativeTarget "SilentSpot" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = KDCZSHJ2KQ;
@@ -275,6 +276,7 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Use Face ID to protect your saved places and preferences.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "SilentSpot uses location for optional focus-zone alerts near favourite quiet places.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "SilentSpot uses your location to tag measurements and find nearby quiet places.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "SilentSpot uses the microphone to estimate environmental sound level. Audio is never stored.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -312,6 +314,7 @@
 		000000000000000112000000 /* Release configuration for PBXNativeTarget "SilentSpot" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = KDCZSHJ2KQ;
@@ -320,6 +323,7 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Use Face ID to protect your saved places and preferences.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "SilentSpot uses location for optional focus-zone alerts near favourite quiet places.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "SilentSpot uses your location to tag measurements and find nearby quiet places.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "SilentSpot uses the microphone to estimate environmental sound level. Audio is never stored.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

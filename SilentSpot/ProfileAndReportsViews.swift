@@ -12,12 +12,25 @@ struct ReportsView: View {
         var id: Self { self }
     }
 
-    private var chartData: [NoiseMeasurement] { Array(store.measurements.prefix(14).reversed()) }
-    private var averageNoise: Double {
-        guard !store.measurements.isEmpty else { return 0 }
-        return store.measurements.map(\.decibels).reduce(0, +) / Double(store.measurements.count)
+    private var filteredMeasurements: [NoiseMeasurement] {
+        let calendar = Calendar.current
+        return store.measurements.filter { measurement in
+            switch period {
+            case .today:
+                calendar.isDateInToday(measurement.timestamp)
+            case .week:
+                calendar.dateInterval(of: .weekOfYear, for: .now)?.contains(measurement.timestamp) == true
+            case .month:
+                calendar.dateInterval(of: .month, for: .now)?.contains(measurement.timestamp) == true
+            }
+        }
     }
-    private var quietestMeasurement: NoiseMeasurement? { store.measurements.min(by: { $0.decibels < $1.decibels }) }
+    private var chartData: [NoiseMeasurement] { Array(filteredMeasurements.prefix(50).reversed()) }
+    private var averageNoise: Double {
+        guard !filteredMeasurements.isEmpty else { return 0 }
+        return filteredMeasurements.map(\.decibels).reduce(0, +) / Double(filteredMeasurements.count)
+    }
+    private var quietestMeasurement: NoiseMeasurement? { filteredMeasurements.min(by: { $0.decibels < $1.decibels }) }
 
     var body: some View {
         ScrollView {
@@ -28,7 +41,7 @@ struct ReportsView: View {
                 .pickerStyle(.segmented)
 
                 HStack(spacing: 10) {
-                    MetricCard(value: store.measurements.isEmpty ? "—" : averageNoise.formatted(.number.precision(.fractionLength(0))) + " dB", label: "Average noise")
+                    MetricCard(value: filteredMeasurements.isEmpty ? "—" : averageNoise.formatted(.number.precision(.fractionLength(0))) + " dB", label: "Average noise")
                     MetricCard(value: quietestMeasurement?.locationName ?? "—", label: "Quietest place")
                     MetricCard(value: quietestMeasurement?.timestamp.formatted(date: .omitted, time: .shortened) ?? "—", label: "Quietest time")
                 }
@@ -36,21 +49,26 @@ struct ReportsView: View {
                 AppCard {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Noise history").font(.headline)
-                        Chart(chartData) { measurement in
-                            LineMark(x: .value("Time", measurement.timestamp), y: .value("dB", measurement.decibels))
-                                .foregroundStyle(AppTheme.accent)
-                            PointMark(x: .value("Time", measurement.timestamp), y: .value("dB", measurement.decibels))
-                                .foregroundStyle(measurement.status.color)
+                        if chartData.isEmpty {
+                            ContentUnavailableView("No measurements", systemImage: "chart.xyaxis.line", description: Text("No readings were saved in this period."))
+                                .frame(height: 210)
+                        } else {
+                            Chart(chartData) { measurement in
+                                LineMark(x: .value("Time", measurement.timestamp), y: .value("dB", measurement.decibels))
+                                    .foregroundStyle(AppTheme.accent)
+                                PointMark(x: .value("Time", measurement.timestamp), y: .value("dB", measurement.decibels))
+                                    .foregroundStyle(measurement.status.color)
+                            }
+                            .chartYScale(domain: 25...100)
+                            .frame(height: 210)
                         }
-                        .chartYScale(domain: 25...75)
-                        .frame(height: 210)
                     }
                 }
 
                 AppCard {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Contribution history").font(.headline)
-                        ForEach(store.measurements.prefix(5)) { measurement in
+                        ForEach(filteredMeasurements.prefix(10)) { measurement in
                             HStack {
                                 Image(systemName: "waveform.circle.fill").foregroundStyle(measurement.status.color)
                                 VStack(alignment: .leading) {
@@ -93,16 +111,19 @@ struct ProfileView: View {
     @State private var showingSettings = false
     @State private var showingReports = false
     @State private var showingNotifications = false
+    @State private var showingRewards = false
 
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
                 AppCard {
                     HStack(spacing: 14) {
-                        Image(systemName: "person.crop.circle.fill").font(.system(size: 58)).foregroundStyle(AppTheme.accent)
+                        Image(systemName: store.equippedReward?.symbol ?? "person.crop.circle.fill")
+                            .font(.system(size: 58))
+                            .foregroundStyle(AppTheme.accent)
                         VStack(alignment: .leading, spacing: 4) {
                             Text(store.userName).font(.title2.bold())
-                            Text("Community Level: Quiet Explorer").font(.footnote).foregroundStyle(.secondary)
+                            Text("Profile Title: \(store.profileTitle)").font(.footnote).foregroundStyle(.secondary)
                             Label("\(store.points) Points", systemImage: "star.fill").font(.subheadline.weight(.semibold)).foregroundStyle(AppTheme.warning)
                         }
                     }
@@ -117,18 +138,20 @@ struct ProfileView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Badges").font(.title2.bold())
                     HStack(spacing: 10) {
-                        BadgeView(symbol: "safari.fill", title: "Quiet Explorer")
-                        BadgeView(symbol: "mappin.and.ellipse", title: "Spot Finder")
-                        BadgeView(symbol: "person.3.fill", title: "Contributor")
+                        ForEach(store.rewardBadges) { badge in
+                            BadgeView(badge: badge)
+                        }
                     }
                 }
 
+                Button("Spend Points", systemImage: "gift.fill") { showingRewards = true }
+                    .buttonStyle(PrimaryButtonStyle())
                 Button("Noise History & Reports", systemImage: "chart.xyaxis.line") { showingReports = true }
                     .buttonStyle(SecondaryButtonStyle())
                 Button("Notifications", systemImage: "bell.fill") { showingNotifications = true }
                     .buttonStyle(SecondaryButtonStyle())
                 Button("Profile & Settings", systemImage: "gearshape.fill") { showingSettings = true }
-                    .buttonStyle(PrimaryButtonStyle())
+                    .buttonStyle(SecondaryButtonStyle())
             }
             .padding()
         }
@@ -139,16 +162,117 @@ struct ProfileView: View {
         .sheet(isPresented: $showingSettings) { NavigationStack { SettingsView() } }
         .sheet(isPresented: $showingReports) { NavigationStack { ReportsView() } }
         .sheet(isPresented: $showingNotifications) { NavigationStack { NotificationsView() } }
+        .sheet(isPresented: $showingRewards) { NavigationStack { RewardsShopView() } }
+    }
+}
+
+struct RewardsShopView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var store: AppStore
+    @State private var resultMessage = ""
+    @State private var showingResult = false
+
+    var body: some View {
+        List {
+            Section {
+                HStack(spacing: 14) {
+                    Image(systemName: "star.circle.fill")
+                        .font(.system(size: 42))
+                        .foregroundStyle(AppTheme.warning)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Available Balance").font(.subheadline).foregroundStyle(.secondary)
+                        Text("\(store.points) points").font(.title2.bold())
+                    }
+                }
+                .padding(.vertical, 6)
+            } footer: {
+                Text("Earn 10 points for a noise measurement and 50 points for submitting a new quiet spot.")
+            }
+
+            Section("Profile Rewards") {
+                ForEach(store.rewards) { reward in
+                    RewardShopRow(
+                        reward: reward,
+                        isPurchased: store.purchasedRewardIDs.contains(reward.id),
+                        isEquipped: store.equippedRewardID == reward.id,
+                        canAfford: store.points >= reward.cost,
+                        isBusy: store.isBusy
+                    ) {
+                        Task { await use(reward) }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Rewards Shop")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        .alert("Rewards", isPresented: $showingResult) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(resultMessage)
+        }
+    }
+
+    private func use(_ reward: RewardItem) async {
+        let alreadyPurchased = store.purchasedRewardIDs.contains(reward.id)
+        let success = alreadyPurchased
+            ? await store.equipReward(reward)
+            : await store.purchaseReward(reward)
+        resultMessage = success
+            ? (alreadyPurchased ? "\(reward.title) is now equipped." : "\(reward.title) was unlocked and equipped.")
+            : (store.backendError ?? "The reward could not be updated.")
+        showingResult = true
+    }
+}
+
+private struct RewardShopRow: View {
+    let reward: RewardItem
+    let isPurchased: Bool
+    let isEquipped: Bool
+    let canAfford: Bool
+    let isBusy: Bool
+    let action: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: reward.symbol)
+                .font(.title2)
+                .foregroundStyle(AppTheme.accent)
+                .frame(width: 42, height: 42)
+                .background(AppTheme.softTeal, in: Circle())
+            VStack(alignment: .leading, spacing: 3) {
+                Text(reward.title).font(.headline)
+                Text(reward.detail).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            Button(buttonTitle, action: action)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(isBusy || isEquipped || (!isPurchased && !canAfford))
+        }
+        .padding(.vertical, 5)
+    }
+
+    private var buttonTitle: String {
+        if isEquipped { return "Equipped" }
+        if isPurchased { return "Equip" }
+        if canAfford { return "\(reward.cost)" }
+        return "Need \(reward.cost)"
     }
 }
 
 private struct BadgeView: View {
-    let symbol: String
-    let title: String
+    let badge: RewardBadge
     var body: some View {
         VStack(spacing: 9) {
-            Image(systemName: symbol).font(.title).foregroundStyle(AppTheme.accent)
-            Text(title).font(.caption2.weight(.semibold)).multilineTextAlignment(.center)
+            Image(systemName: badge.isUnlocked ? badge.symbol : "lock.fill")
+                .font(.title)
+                .foregroundStyle(badge.isUnlocked ? AppTheme.accent : .secondary)
+            Text(badge.title).font(.caption2.weight(.semibold)).multilineTextAlignment(.center)
+            Text(badge.isUnlocked ? "Unlocked" : badge.detail)
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity, minHeight: 104)
         .background(AppTheme.softTeal, in: RoundedRectangle(cornerRadius: 16))
@@ -179,7 +303,6 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: AppStore
     @EnvironmentObject private var locationService: LocationService
-    @State private var notificationToggle = true
     @State private var showingPrivacy = false
 
     var body: some View {
@@ -189,17 +312,42 @@ struct SettingsView: View {
                     Image(systemName: "person.crop.circle.fill").font(.largeTitle).foregroundStyle(AppTheme.accent)
                     VStack(alignment: .leading) {
                         Text(store.userName).font(.headline)
-                        Text("\(store.points) points • Quiet Explorer").font(.caption).foregroundStyle(.secondary)
+                        Text("\(store.points) points • \(store.communityLevel)").font(.caption).foregroundStyle(.secondary)
                     }
                 }
             }
             Section("Security & Alerts") {
-                Toggle("Face ID", isOn: $store.faceIDEnabled)
-                Toggle("Notifications", isOn: $notificationToggle)
-                    .onChange(of: notificationToggle) { _, enabled in
-                        if enabled { Task { store.notificationsEnabled = await NotificationService.requestPermission() } }
-                        else { store.notificationsEnabled = false }
+                Toggle("Face ID", isOn: Binding(
+                    get: { store.faceIDEnabled },
+                    set: { enabled in Task { _ = await store.updateFaceID(enabled: enabled) } }
+                ))
+                Toggle("Notifications", isOn: Binding(
+                    get: { store.notificationsEnabled },
+                    set: { enabled in
+                        if enabled {
+                            Task { store.setNotificationsEnabled(await NotificationService.requestPermission()) }
+                        } else {
+                            store.setNotificationsEnabled(false)
+                        }
                     }
+                ))
+                Toggle("Favourite Focus Zones", isOn: Binding(
+                    get: { store.focusZonesEnabled },
+                    set: { enabled in
+                        store.setFocusZonesEnabled(enabled)
+                        locationService.syncFocusZones(spots: store.favourites, enabled: enabled)
+                    }
+                ))
+            }
+            Section("Appearance") {
+                Picker("Theme", selection: Binding(
+                    get: { store.appearance },
+                    set: store.setAppearance
+                )) {
+                    ForEach(AppAppearance.allCases) { appearance in
+                        Text(appearance.rawValue).tag(appearance)
+                    }
+                }
             }
             Section("Permissions") {
                 LabeledContent("Location Permission", value: locationText)
