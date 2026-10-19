@@ -10,6 +10,7 @@ struct NoiseMapView: View {
     @State private var selectedMeasurement: NoiseMeasurement?
     @State private var showingAddSpot = false
     @State private var showingFinder = false
+    @State private var didFocusUserLocation = false
 
     var body: some View {
         NavigationStack {
@@ -87,12 +88,23 @@ struct NoiseMapView: View {
             .onChange(of: store.measurements.first?.id) { _, _ in
                 focusLatestMeasurement()
             }
+            .onChange(of: locationService.location?.timestamp) { _, _ in
+                guard store.measurements.first(where: \.hasValidCoordinate) == nil,
+                      !didFocusUserLocation,
+                      let coordinate = locationService.location?.coordinate else { return }
+                didFocusUserLocation = true
+                position = .region(.init(
+                    center: coordinate,
+                    span: .init(latitudeDelta: 0.012, longitudeDelta: 0.012)
+                ))
+            }
         }
     }
 
     private func focusLatestMeasurement() {
         guard let measurement = store.measurements.first(where: \.hasValidCoordinate) else {
             if let coordinate = locationService.location?.coordinate {
+                didFocusUserLocation = true
                 position = .region(.init(center: coordinate, span: .init(latitudeDelta: 0.012, longitudeDelta: 0.012)))
             }
             return
