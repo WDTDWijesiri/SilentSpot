@@ -2,6 +2,28 @@ import Charts
 import MapKit
 import SwiftUI
 
+private enum MapNoiseFilter: String, CaseIterable, Hashable {
+    case quiet = "Quiet"
+    case moderate = "Moderate"
+    case noisy = "Noisy"
+
+    var status: NoiseStatus {
+        switch self {
+        case .quiet: .quiet
+        case .moderate: .moderate
+        case .noisy: .noisy
+        }
+    }
+
+    func matches(_ status: NoiseStatus) -> Bool {
+        switch self {
+        case .quiet: status == .quiet
+        case .moderate: status == .moderate
+        case .noisy: status == .noisy || status == .veryNoisy
+        }
+    }
+}
+
 struct NoiseMapView: View {
     @EnvironmentObject private var store: AppStore
     @EnvironmentObject private var locationService: LocationService
@@ -11,13 +33,22 @@ struct NoiseMapView: View {
     @State private var showingAddSpot = false
     @State private var showingFinder = false
     @State private var didFocusUserLocation = false
+    @State private var visibleFilters = Set(MapNoiseFilter.allCases)
+
+    private var visibleSpots: [QuietSpot] {
+        store.spots.filter { itemIsVisible(status: $0.status) }
+    }
+
+    private var visibleMeasurements: [NoiseMeasurement] {
+        store.measurements.filter { $0.hasValidCoordinate && itemIsVisible(status: $0.status) }
+    }
 
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
                 Map(position: $position) {
                     UserAnnotation()
-                    ForEach(store.spots) { spot in
+                    ForEach(visibleSpots) { spot in
                         Annotation(spot.name, coordinate: spot.coordinate) {
                             Button {
                                 selectedMeasurement = nil
@@ -31,7 +62,7 @@ struct NoiseMapView: View {
                             .accessibilityLabel("\(spot.name), \(spot.status.rawValue)")
                         }
                     }
-                    ForEach(store.measurements.filter(\.hasValidCoordinate)) { measurement in
+                    ForEach(visibleMeasurements) { measurement in
                         Annotation("Saved measurement", coordinate: measurement.coordinate) {
                             Button {
                                 selectedSpot = nil
@@ -53,9 +84,14 @@ struct NoiseMapView: View {
 
                 VStack(spacing: 10) {
                     HStack {
-                        StatusPill(status: .quiet)
-                        StatusPill(status: .moderate)
-                        StatusPill(status: .noisy)
+                        ForEach(MapNoiseFilter.allCases, id: \.self) { filter in
+                            MapFilterChip(
+                                filter: filter,
+                                isSelected: visibleFilters.contains(filter)
+                            ) {
+                                toggle(filter)
+                            }
+                        }
                     }
                     .padding(8)
                     .background(.regularMaterial, in: Capsule())
@@ -115,6 +151,51 @@ struct NoiseMapView: View {
             center: measurement.coordinate,
             span: .init(latitudeDelta: 0.012, longitudeDelta: 0.012)
         ))
+    }
+
+    private func itemIsVisible(status: NoiseStatus) -> Bool {
+        visibleFilters.contains { $0.matches(status) }
+    }
+
+    private func toggle(_ filter: MapNoiseFilter) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            if visibleFilters.contains(filter) {
+                visibleFilters.remove(filter)
+            } else {
+                visibleFilters.insert(filter)
+            }
+
+            if let selectedSpot, !itemIsVisible(status: selectedSpot.status) {
+                self.selectedSpot = nil
+            }
+            if let selectedMeasurement, !itemIsVisible(status: selectedMeasurement.status) {
+                self.selectedMeasurement = nil
+            }
+        }
+    }
+}
+
+private struct MapFilterChip: View {
+    let filter: MapNoiseFilter
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(filter.rawValue, systemImage: isSelected ? "circle.fill" : "circle")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(isSelected ? filter.status.color : Color.secondary)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 9)
+                .background(
+                    isSelected ? filter.status.color.opacity(0.14) : Color(.secondarySystemBackground),
+                    in: Capsule()
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(filter.rawValue) pins")
+        .accessibilityValue(isSelected ? "Shown" : "Hidden")
+        .accessibilityHint("Double tap to \(isSelected ? "hide" : "show") these map pins")
     }
 }
 
