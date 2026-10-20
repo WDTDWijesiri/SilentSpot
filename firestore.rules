@@ -29,8 +29,21 @@ service cloud.firestore {
       allow read: if signedIn();
       allow create: if signedIn() && request.resource.data.submittedBy == request.auth.uid;
       allow update: if signedIn()
+        && resource.data.submittedBy != request.auth.uid
+        && resource.data.contributorIDs is list
+        && !resource.data.contributorIDs.hasAny([request.auth.uid])
         && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['currentDB', 'measurementCount', 'lastMeasured', 'isVerified', 'contributorIDs']);
+          .hasOnly(['currentDB', 'measurementCount', 'lastMeasured', 'isVerified', 'contributorIDs'])
+        && request.resource.data.measurementCount == resource.data.measurementCount + 1
+        && request.resource.data.contributorIDs.size() == resource.data.contributorIDs.size() + 1
+        && request.resource.data.contributorIDs.hasAll(resource.data.contributorIDs)
+        && request.resource.data.contributorIDs.hasAny([request.auth.uid])
+        && request.resource.data.currentDB >= 0
+        && request.resource.data.currentDB <= 120
+        && request.resource.data.isVerified == (
+          request.resource.data.measurementCount >= request.resource.data.verificationTarget
+          && request.resource.data.currentDB < 45
+        );
       allow delete: if signedIn() && resource.data.submittedBy == request.auth.uid;
     }
 

@@ -18,6 +18,7 @@ final class FirebaseService: ObservableObject {
     @Published private(set) var equippedRewardID: String?
     @Published private(set) var userName = "User"
     @Published private(set) var favouriteIDs: Set<UUID> = []
+    @Published private(set) var syncErrorMessage: String?
 
     private var listeners: [ListenerRegistration] = []
     private var authHandle: AuthStateDidChangeListenerHandle?
@@ -93,6 +94,26 @@ final class FirebaseService: ObservableObject {
         try await batch.commit()
     }
 
+    func refreshCommunitySpots() async throws {
+        _ = try userID()
+        let snapshot = try await Firestore.firestore()
+            .collection("quietSpots")
+            .getDocuments(source: .server)
+        spots = decodedSpots(from: snapshot.documents)
+        syncErrorMessage = nil
+        applyFavouriteState()
+    }
+
+    func refreshCommunityMeasurements() async throws {
+        _ = try userID()
+        let snapshot = try await Firestore.firestore()
+            .collection("measurements")
+            .order(by: "timestamp", descending: true)
+            .limit(to: 500)
+            .getDocuments(source: .server)
+        communityMeasurements = snapshot.documents.compactMap(decodeMeasurement)
+    }
+
     func contribute(to spot: QuietSpot, decibels: Double, latitude: Double, longitude: Double) async throws -> Bool {
         let uid = try userID()
         let database = Firestore.firestore()
@@ -115,7 +136,8 @@ final class FirebaseService: ObservableObject {
                 let newCount = oldCount + 1
                 let newDB = ((oldDB * Double(oldCount)) + decibels) / Double(max(newCount, 1))
                 let wasVerified = snapshot.data()?["isVerified"] as? Bool ?? false
-                let isNowVerified = wasVerified || newCount >= (snapshot.data()?["verificationTarget"] as? Int ?? 3)
+                let target = snapshot.data()?["verificationTarget"] as? Int ?? 3
+                let isNowVerified = newCount >= target && NoiseStatus.classify(newDB) == .quiet
                 let becameVerified = !wasVerified && isNowVerified
                 transaction.updateData([
                     "currentDB": newDB,
@@ -220,10 +242,16 @@ final class FirebaseService: ObservableObject {
             }
         })
 
-        listeners.append(database.collection("quietSpots").order(by: "lastMeasured", descending: true).addSnapshotListener { [weak self] snapshot, _ in
+        // Sort locally so older shared spots without `lastMeasured` are not excluded.
+        listeners.append(database.collection("quietSpots").addSnapshotListener { [weak self] snapshot, error in
             Task { @MainActor in
                 guard let self else { return }
-                self.spots = snapshot?.documents.compactMap { self.decodeSpot($0) } ?? []
+                if let error {
+                    self.syncErrorMessage = "Community quiet spots could not be loaded: \(error.localizedDescription)"
+                    return
+                }
+                self.syncErrorMessage = nil
+                self.spots = self.decodedSpots(from: snapshot?.documents ?? [])
                 self.applyFavouriteState()
             }
         })
@@ -234,9 +262,14 @@ final class FirebaseService: ObservableObject {
             }
         })
 
-        listeners.append(database.collection("measurements").order(by: "timestamp", descending: true).limit(to: 500).addSnapshotListener { [weak self] snapshot, _ in
+        listeners.append(database.collection("measurements").order(by: "timestamp", descending: true).limit(to: 500).addSnapshotListener { [weak self] snapshot, error in
             Task { @MainActor in
-                self?.communityMeasurements = snapshot?.documents.compactMap { self?.decodeMeasurement($0) } ?? []
+                guard let self else { return }
+                if let error {
+                    self.syncErrorMessage = "Community measurements could not be loaded: \(error.localizedDescription)"
+                    return
+                }
+                self.communityMeasurements = snapshot?.documents.compactMap(self.decodeMeasurement) ?? []
             }
         })
 
@@ -268,24 +301,38 @@ final class FirebaseService: ObservableObject {
         guard let id = UUID(uuidString: document.documentID),
               let name = data["name"] as? String,
               let categoryValue = data["category"] as? String,
-              let category = SpotCategory(rawValue: categoryValue) else { return nil }
+              let category = SpotCategory.fromFirestore(categoryValue) else { return nil }
         return QuietSpot(
             id: id,
             name: name,
-            latitude: data["latitude"] as? Double ?? 0,
-            longitude: data["longitude"] as? Double ?? 0,
-            currentDB: data["currentDB"] as? Double ?? 0,
+            latitude: number(data["latitude"]),
+            longitude: number(data["longitude"]),
+            currentDB: number(data["currentDB"]),
             category: category,
-            distanceKM: data["distanceKM"] as? Double ?? 0,
-            lastMeasured: (data["lastMeasured"] as? Timestamp)?.dateValue() ?? .now,
-            measurementCount: data["measurementCount"] as? Int ?? 0,
-            verificationTarget: data["verificationTarget"] as? Int ?? 3,
+            distanceKM: number(data["distanceKM"]),
+            lastMeasured: (data["lastMeasured"] as? Timestamp)?.dateValue() ?? .distantPast,
+            measurementCount: integer(data["measurementCount"]),
+            verificationTarget: max(3, integer(data["verificationTarget"])),
             isVerified: data["isVerified"] as? Bool ?? false,
             isFavourite: favouriteIDs.contains(id),
             note: data["note"] as? String ?? "",
             bestTime: data["bestTime"] as? String ?? "Collecting data",
-            isSubmittedByCurrentUser: data["submittedBy"] as? String == currentUserID
+            submittedByName: data["submittedByName"] as? String ?? "Community member",
+            isSubmittedByCurrentUser: data["submittedBy"] as? String == currentUserID,
+            hasCurrentUserContributed: (data["contributorIDs"] as? [String] ?? []).contains(currentUserID ?? "")
         )
+    }
+
+    private func decodedSpots(from documents: [QueryDocumentSnapshot]) -> [QuietSpot] {
+        documents.compactMap(decodeSpot).sorted { $0.lastMeasured > $1.lastMeasured }
+    }
+
+    private func number(_ value: Any?) -> Double {
+        (value as? NSNumber)?.doubleValue ?? 0
+    }
+
+    private func integer(_ value: Any?) -> Int {
+        (value as? NSNumber)?.intValue ?? 0
     }
 
     private func decodeMeasurement(_ document: QueryDocumentSnapshot) -> NoiseMeasurement? {
@@ -354,6 +401,7 @@ final class FirebaseService: ObservableObject {
         purchasedRewardIDs = []
         equippedRewardID = nil
         favouriteIDs = []
+        syncErrorMessage = nil
         currentUserID = nil
     }
 }

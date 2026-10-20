@@ -33,14 +33,28 @@ struct NoiseMapView: View {
     @State private var showingAddSpot = false
     @State private var showingFinder = false
     @State private var didFocusUserLocation = false
+    @State private var didFitCommunitySpots = false
     @State private var visibleFilters = Set(MapNoiseFilter.allCases)
+    @State private var nearbyOnly = false
+    @State private var selectedCategory: SpotCategory?
+
+    private let nearbyRadiusKM = 5.0
 
     private var visibleSpots: [QuietSpot] {
-        store.spots.filter { itemIsVisible(status: $0.status) }
+        store.spots.filter { spot in
+            itemIsVisible(status: spot.status) &&
+            (selectedCategory == nil || spot.category == selectedCategory) &&
+            isInsideNearbyFilter(latitude: spot.latitude, longitude: spot.longitude)
+        }
     }
 
     private var visibleMeasurements: [NoiseMeasurement] {
-        store.measurements.filter { $0.hasValidCoordinate && itemIsVisible(status: $0.status) }
+        guard selectedCategory == nil else { return [] }
+        return store.communityMeasurements.filter {
+            $0.hasValidCoordinate &&
+            itemIsVisible(status: $0.status) &&
+            isInsideNearbyFilter(latitude: $0.latitude, longitude: $0.longitude)
+        }
     }
 
     var body: some View {
@@ -63,7 +77,7 @@ struct NoiseMapView: View {
                         }
                     }
                     ForEach(visibleMeasurements) { measurement in
-                        Annotation("Saved measurement", coordinate: measurement.coordinate) {
+                        Annotation("Community measurement", coordinate: measurement.coordinate) {
                             Button {
                                 selectedSpot = nil
                                 selectedMeasurement = measurement
@@ -76,7 +90,7 @@ struct NoiseMapView: View {
                                         .background(.white, in: Circle())
                                 }
                             }
-                            .accessibilityLabel("Saved measurement, \(measurement.status.rawValue), \(measurement.decibels.formatted()) decibels")
+                            .accessibilityLabel("Community measurement, \(measurement.status.rawValue), \(measurement.decibels.formatted()) decibels")
                         }
                     }
                 }
@@ -94,6 +108,50 @@ struct NoiseMapView: View {
                         }
                     }
                     .padding(8)
+                    .background(.regularMaterial, in: Capsule())
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            MapOptionChip(
+                                title: "Nearby \(Int(nearbyRadiusKM)) km",
+                                symbol: "location.fill",
+                                isSelected: nearbyOnly
+                            ) {
+                                nearbyOnly.toggle()
+                                if nearbyOnly { locationService.requestPermission() }
+                                filterDidChange()
+                            }
+
+                            ForEach(SpotCategory.allCases) { category in
+                                MapOptionChip(
+                                    title: category.rawValue,
+                                    symbol: category.symbol,
+                                    isSelected: selectedCategory == category
+                                ) {
+                                    selectedCategory = selectedCategory == category ? nil : category
+                                    filterDidChange()
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 2)
+                    }
+
+                    HStack(spacing: 12) {
+                        Label("\(visibleSpots.count) spots • \(visibleMeasurements.count) readings", systemImage: "person.3.fill")
+                            .font(.caption.weight(.semibold))
+                        Spacer()
+                        Button("Refresh", systemImage: "arrow.clockwise") {
+                            Task { await refreshAndShowAll() }
+                        }
+                        .labelStyle(.iconOnly)
+                        Button("Show All", systemImage: "scope") {
+                            position = .automatic
+                        }
+                        .labelStyle(.iconOnly)
+                        .disabled(visibleSpots.isEmpty && visibleMeasurements.isEmpty)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
                     .background(.regularMaterial, in: Capsule())
 
                     if let spot = selectedSpot {
@@ -121,8 +179,19 @@ struct NoiseMapView: View {
                 locationService.requestPermission()
                 focusLatestMeasurement()
             }
+            .task { await store.refreshCommunityMapData() }
             .onChange(of: store.measurements.first?.id) { _, _ in
                 focusLatestMeasurement()
+            }
+            .onChange(of: store.spots.map(\.id)) { _, ids in
+                guard !ids.isEmpty, !didFitCommunitySpots else { return }
+                didFitCommunitySpots = true
+                position = .automatic
+            }
+            .onChange(of: store.communityMeasurements.map(\.id)) { _, ids in
+                guard !ids.isEmpty, !didFitCommunitySpots else { return }
+                didFitCommunitySpots = true
+                position = .automatic
             }
             .onChange(of: locationService.location?.timestamp) { _, _ in
                 guard store.measurements.first(where: \.hasValidCoordinate) == nil,
@@ -157,6 +226,13 @@ struct NoiseMapView: View {
         visibleFilters.contains { $0.matches(status) }
     }
 
+    private func isInsideNearbyFilter(latitude: Double, longitude: Double) -> Bool {
+        guard nearbyOnly else { return true }
+        guard let userLocation = locationService.location else { return false }
+        let itemLocation = CLLocation(latitude: latitude, longitude: longitude)
+        return userLocation.distance(from: itemLocation) <= nearbyRadiusKM * 1_000
+    }
+
     private func toggle(_ filter: MapNoiseFilter) {
         withAnimation(.easeInOut(duration: 0.2)) {
             if visibleFilters.contains(filter) {
@@ -172,6 +248,40 @@ struct NoiseMapView: View {
                 self.selectedMeasurement = nil
             }
         }
+    }
+
+    private func refreshAndShowAll() async {
+        await store.refreshCommunityMapData()
+        if !store.spots.isEmpty || !store.communityMeasurements.isEmpty {
+            position = .automatic
+        }
+    }
+
+    private func filterDidChange() {
+        selectedSpot = nil
+        selectedMeasurement = nil
+        position = .automatic
+    }
+}
+
+private struct MapOptionChip: View {
+    let title: String
+    let symbol: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(isSelected ? Color.white : AppTheme.accent)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(isSelected ? AppTheme.accent : Color(.systemBackground), in: Capsule())
+                .overlay(Capsule().stroke(isSelected ? Color.clear : Color(.separator)))
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(isSelected ? "Selected" : "Not selected")
     }
 }
 
@@ -206,7 +316,7 @@ private struct MapMeasurementCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label("Your saved measurement", systemImage: "waveform")
+                Label("Community noise measurement", systemImage: "waveform")
                     .font(.headline)
                 Spacer()
                 Button("Close", systemImage: "xmark", action: close).labelStyle(.iconOnly)
@@ -465,6 +575,7 @@ struct AddQuietSpotView: View {
     @State private var submittedSpot: QuietSpot?
     @State private var locationUnavailable = false
     @State private var isSubmitting = false
+    @State private var submissionError: String?
     @FocusState private var focusedField: Field?
 
     var body: some View {
@@ -559,7 +670,7 @@ struct AddQuietSpotView: View {
                                 locationUnavailable = true
                                 return
                             }
-                            submittedSpot = store.submitSpot(
+                            submittedSpot = await store.submitSpot(
                                 name: name.trimmingCharacters(in: .whitespacesAndNewlines),
                                 category: category,
                                 note: note.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -567,6 +678,9 @@ struct AddQuietSpotView: View {
                                 latitude: coordinate.latitude,
                                 longitude: coordinate.longitude
                             )
+                            if submittedSpot == nil {
+                                submissionError = store.backendError ?? "The quiet spot could not be saved to Firebase."
+                            }
                         }
                     }
                     .buttonStyle(PrimaryButtonStyle())
@@ -594,6 +708,14 @@ struct AddQuietSpotView: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text("A current location is required before this quiet spot can be submitted.")
+            }
+            .alert("Could not submit spot", isPresented: Binding(
+                get: { submissionError != nil },
+                set: { if !$0 { submissionError = nil } }
+            )) {
+                Button("OK", role: .cancel) { submissionError = nil }
+            } message: {
+                Text(submissionError ?? "Try again.")
             }
             .alert("Microphone permission needed", isPresented: $monitor.permissionDenied) {
                 Button("Open Settings") {
@@ -629,6 +751,11 @@ struct CommunityVerificationView: View {
 
     private var currentSpot: QuietSpot { store.spots.first(where: { $0.id == spot.id }) ?? spot }
     private var progress: Double { min(1, Double(currentSpot.measurementCount) / Double(currentSpot.verificationTarget)) }
+    private var canContribute: Bool {
+        !currentSpot.isVerified &&
+        !currentSpot.isSubmittedByCurrentUser &&
+        !currentSpot.hasCurrentUserContributed
+    }
 
     var body: some View {
         NavigationStack {
@@ -638,9 +765,12 @@ struct CommunityVerificationView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("NEW QUIET SPOT").font(.caption.weight(.semibold)).foregroundStyle(AppTheme.accent)
                             Text(currentSpot.name).font(.title.bold())
-                            Text("Submitted by \(store.userName)").foregroundStyle(.secondary)
+                            Text("Submitted by \(currentSpot.submittedByName)").foregroundStyle(.secondary)
                             Label(currentSpot.isVerified ? "Verified Quiet Spot" : "Pending Verification", systemImage: currentSpot.isVerified ? "checkmark.seal.fill" : "clock.fill")
                                 .foregroundStyle(currentSpot.isVerified ? AppTheme.quiet : AppTheme.warning)
+                            Label("Current result: \(currentSpot.status.rawValue) • \(currentSpot.currentDB, specifier: "%.0f") dB", systemImage: "waveform")
+                                .font(.subheadline)
+                                .foregroundStyle(currentSpot.status.color)
                         }
                     }
                     AppCard {
@@ -648,7 +778,7 @@ struct CommunityVerificationView: View {
                             Text("Community measurements").font(.headline)
                             Text("\(currentSpot.measurementCount) / \(currentSpot.verificationTarget)").font(.largeTitle.bold()).foregroundStyle(AppTheme.accent)
                             ProgressView(value: progress).tint(AppTheme.accent)
-                            Text(currentSpot.isVerified ? "Enough measurements received." : "One more nearby measurement may be needed.").foregroundStyle(.secondary)
+                            Text(verificationMessage).foregroundStyle(.secondary)
                         }
                     }
                     Button(monitor.isMonitoring ? "Stop & Contribute" : "Start Measurement", systemImage: monitor.isMonitoring ? "stop.fill" : "waveform") {
@@ -680,6 +810,7 @@ struct CommunityVerificationView: View {
                         }
                     }
                     .buttonStyle(PrimaryButtonStyle())
+                    .disabled(!canContribute)
                     Label("Measurements from different community members are combined to verify the spot.", systemImage: "person.3.fill")
                         .font(.footnote).foregroundStyle(.secondary).padding()
                 }
@@ -703,5 +834,21 @@ struct CommunityVerificationView: View {
                 Text("Your nearby measurement was added to the community verification count.")
             }
         }
+    }
+
+    private var verificationMessage: String {
+        if currentSpot.isVerified {
+            return "Enough community measurements confirmed that this place is quiet."
+        }
+        if currentSpot.isSubmittedByCurrentUser {
+            return "You submitted this spot. Another nearby community member must measure it."
+        }
+        if currentSpot.hasCurrentUserContributed {
+            return "You already measured this spot. Another community member must provide the next verification."
+        }
+        if currentSpot.measurementCount >= currentSpot.verificationTarget && currentSpot.status != .quiet {
+            return "Enough readings were collected, but the average is not quiet. New nearby measurements can update the result."
+        }
+        return "Visit this location and add a live measurement to help verify whether it is quiet."
     }
 }

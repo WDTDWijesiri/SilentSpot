@@ -217,10 +217,35 @@ final class AppStore: ObservableObject {
         }
     }
 
-    func submitSpot(name: String, category: SpotCategory, note: String, decibels: Double, latitude: Double, longitude: Double) -> QuietSpot {
+    func submitSpot(name: String, category: SpotCategory, note: String, decibels: Double, latitude: Double, longitude: Double) async -> QuietSpot? {
         let spot = QuietSpot(id: UUID(), name: name, latitude: latitude, longitude: longitude, currentDB: decibels, category: category, distanceKM: 0, lastMeasured: .now, measurementCount: 1, verificationTarget: 3, isVerified: false, isFavourite: false, note: note, bestTime: "Collecting data", isSubmittedByCurrentUser: true)
-        Task { await performBackendWrite { try await self.firebase.submitSpot(spot) } }
-        return spot
+        backendError = nil
+        do {
+            try await firebase.submitSpot(spot)
+            try await firebase.refreshCommunitySpots()
+            return spot
+        } catch {
+            backendError = error.localizedDescription
+            return nil
+        }
+    }
+
+    func refreshCommunitySpots() async {
+        do {
+            try await firebase.refreshCommunitySpots()
+        } catch {
+            backendError = "Community quiet spots could not be refreshed: \(error.localizedDescription)"
+        }
+    }
+
+    func refreshCommunityMapData() async {
+        backendError = nil
+        do {
+            try await firebase.refreshCommunitySpots()
+            try await firebase.refreshCommunityMeasurements()
+        } catch {
+            backendError = "Community map data could not be refreshed: \(error.localizedDescription)"
+        }
     }
 
     func contribute(to spot: QuietSpot, decibels: Double, latitude: Double, longitude: Double) async -> Bool {
@@ -283,6 +308,10 @@ final class AppStore: ObservableObject {
         firebase.$purchasedRewardIDs.assign(to: &$purchasedRewardIDs)
         firebase.$equippedRewardID.assign(to: &$equippedRewardID)
         firebase.$userName.assign(to: &$userName)
+        firebase.$syncErrorMessage
+            .compactMap { $0 }
+            .sink { [weak self] message in self?.backendError = message }
+            .store(in: &cancellables)
     }
 
     private func performAuthentication(credentials: StoredLoginCredentials, _ operation: @escaping () async throws -> Void) async {

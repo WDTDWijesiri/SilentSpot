@@ -20,6 +20,7 @@ enum NoiseStatus: String, Codable, CaseIterable {
 enum SpotCategory: String, Codable, CaseIterable, Identifiable {
     case library = "Library"
     case cafe = "Café"
+    case restaurant = "Restaurant"
     case park = "Park"
     case studyArea = "Study Area"
     case other = "Other"
@@ -29,9 +30,25 @@ enum SpotCategory: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .library: "books.vertical.fill"
         case .cafe: "cup.and.saucer.fill"
+        case .restaurant: "fork.knife"
         case .park: "leaf.fill"
         case .studyArea: "rectangle.and.pencil.and.ellipsis"
         case .other: "mappin.circle.fill"
+        }
+    }
+
+    static func fromFirestore(_ value: String) -> SpotCategory? {
+        if let exact = allCases.first(where: { $0.rawValue.caseInsensitiveCompare(value) == .orderedSame }) {
+            return exact
+        }
+        switch value.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current).lowercased() {
+        case "cafe", "coffee shop", "barista": return .cafe
+        case "restaurant", "food": return .restaurant
+        case "library": return .library
+        case "park": return .park
+        case "study area", "study": return .studyArea
+        case "other": return .other
+        default: return nil
         }
     }
 }
@@ -51,7 +68,9 @@ struct QuietSpot: Identifiable, Codable, Hashable {
     var isFavourite: Bool
     var note: String
     var bestTime: String
+    var submittedByName: String = "Community member"
     var isSubmittedByCurrentUser: Bool = false
+    var hasCurrentUserContributed: Bool = false
 
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
