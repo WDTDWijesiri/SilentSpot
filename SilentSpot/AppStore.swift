@@ -41,6 +41,9 @@ final class AppStore: ObservableObject {
     var isFirebaseConfigured: Bool { firebase.isConfigured }
     var canSignInWithFaceID: Bool { faceIDEnabled && BiometricCredentialStore.hasCredentials }
     var rewards: [RewardItem] { RewardItem.catalogue }
+    var hasFocusTimer: Bool { purchasedRewardIDs.contains("calm-listener") }
+    var hasSmartFinder: Bool { purchasedRewardIDs.contains("quiet-explorer") }
+    var hasAdvancedReports: Bool { purchasedRewardIDs.contains("noise-guardian") }
     var totalEarnedPoints: Int {
         let spent = rewards
             .filter { purchasedRewardIDs.contains($0.id) }
@@ -358,4 +361,5 @@ final class AppStore: ObservableObject {
             backendError = error.localizedDescription
         }
     }
+
 }

@@ -24,6 +24,21 @@ private enum MapNoiseFilter: String, CaseIterable, Hashable {
     }
 }
 
+private enum SmartSpotSort: String, CaseIterable, Identifiable {
+    case nearest = "Nearest"
+    case quietest = "Quietest"
+    case recent = "Recently Measured"
+
+    var id: Self { self }
+    var symbol: String {
+        switch self {
+        case .nearest: "location.fill"
+        case .quietest: "speaker.slash.fill"
+        case .recent: "clock.fill"
+        }
+    }
+}
+
 struct NoiseMapView: View {
     @EnvironmentObject private var store: AppStore
     @EnvironmentObject private var locationService: LocationService
@@ -37,14 +52,27 @@ struct NoiseMapView: View {
     @State private var visibleFilters = Set(MapNoiseFilter.allCases)
     @State private var nearbyOnly = false
     @State private var selectedCategory: SpotCategory?
-
-    private let nearbyRadiusKM = 5.0
+    @State private var nearbyRadiusKM = 5.0
+    @State private var smartSort: SmartSpotSort = .recent
+    @State private var showingSmartFinderLocked = false
 
     private var visibleSpots: [QuietSpot] {
-        store.spots.filter { spot in
+        let filtered = store.spots.filter { spot in
             itemIsVisible(status: spot.status) &&
             (selectedCategory == nil || spot.category == selectedCategory) &&
             isInsideNearbyFilter(latitude: spot.latitude, longitude: spot.longitude)
+        }
+        guard store.hasSmartFinder else { return filtered }
+        return filtered.sorted { first, second in
+            switch smartSort {
+            case .nearest:
+                return (first.distance(from: locationService.location) ?? .greatestFiniteMagnitude) <
+                    (second.distance(from: locationService.location) ?? .greatestFiniteMagnitude)
+            case .quietest:
+                return first.currentDB < second.currentDB
+            case .recent:
+                return first.lastMeasured > second.lastMeasured
+            }
         }
     }
 
@@ -122,6 +150,48 @@ struct NoiseMapView: View {
                                 filterDidChange()
                             }
 
+                            if store.hasSmartFinder {
+                                Menu {
+                                    ForEach([1.0, 3.0, 5.0, 10.0], id: \.self) { radius in
+                                        Button {
+                                            nearbyRadiusKM = radius
+                                            nearbyOnly = true
+                                            locationService.requestPermission()
+                                            filterDidChange()
+                                        } label: {
+                                            if nearbyRadiusKM == radius {
+                                                Label("\(Int(radius)) km", systemImage: "checkmark")
+                                            } else {
+                                                Text("\(Int(radius)) km")
+                                            }
+                                        }
+                                    }
+                                } label: {
+                                    MapMenuChip(title: "Radius", value: "\(Int(nearbyRadiusKM)) km", symbol: "scope")
+                                }
+
+                                Menu {
+                                    ForEach(SmartSpotSort.allCases) { sort in
+                                        Button {
+                                            smartSort = sort
+                                            filterDidChange()
+                                        } label: {
+                                            if smartSort == sort {
+                                                Label(sort.rawValue, systemImage: "checkmark")
+                                            } else {
+                                                Label(sort.rawValue, systemImage: sort.symbol)
+                                            }
+                                        }
+                                    }
+                                } label: {
+                                    MapMenuChip(title: "Sort", value: smartSort.rawValue, symbol: "arrow.up.arrow.down")
+                                }
+                            } else {
+                                MapOptionChip(title: "Smart Finder", symbol: "lock.fill", isSelected: false) {
+                                    showingSmartFinderLocked = true
+                                }
+                            }
+
                             ForEach(SpotCategory.allCases) { category in
                                 MapOptionChip(
                                     title: category.rawValue,
@@ -174,6 +244,11 @@ struct NoiseMapView: View {
             }
             .sheet(isPresented: $showingAddSpot) { AddQuietSpotView() }
             .sheet(isPresented: $showingFinder) { NavigationStack { QuietSpotFinderView() } }
+            .alert("Smart Finder is locked", isPresented: $showingSmartFinderLocked) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Unlock Quiet Explorer in Rewards for custom distance radius and Nearest, Quietest, or Recently Measured sorting.")
+            }
             .navigationDestination(for: QuietSpot.self) { SpotDetailsView(spot: $0) }
             .onAppear {
                 locationService.requestPermission()
@@ -261,6 +336,22 @@ struct NoiseMapView: View {
         selectedSpot = nil
         selectedMeasurement = nil
         position = .automatic
+    }
+}
+
+private struct MapMenuChip: View {
+    let title: String
+    let value: String
+    let symbol: String
+
+    var body: some View {
+        Label("\(title): \(value)", systemImage: symbol)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(AppTheme.accent)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(Color(.systemBackground), in: Capsule())
+            .overlay(Capsule().stroke(Color(.separator)))
     }
 }
 

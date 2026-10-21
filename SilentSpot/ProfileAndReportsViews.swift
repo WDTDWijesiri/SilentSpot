@@ -1,11 +1,13 @@
 import Charts
 import CoreLocation
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ReportsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: AppStore
     @State private var period: ReportPeriod = .week
+    @State private var showingExporter = false
 
     enum ReportPeriod: String, CaseIterable, Identifiable {
         case today = "Today", week = "Week", month = "Month"
@@ -31,6 +33,49 @@ struct ReportsView: View {
         return filteredMeasurements.map(\.decibels).reduce(0, +) / Double(filteredMeasurements.count)
     }
     private var quietestMeasurement: NoiseMeasurement? { filteredMeasurements.min(by: { $0.decibels < $1.decibels }) }
+    private var previousMeasurements: [NoiseMeasurement] {
+        guard let interval = currentInterval else { return [] }
+        let calendar = Calendar.current
+        let previousStart: Date?
+        switch period {
+        case .today: previousStart = calendar.date(byAdding: .day, value: -1, to: interval.start)
+        case .week: previousStart = calendar.date(byAdding: .weekOfYear, value: -1, to: interval.start)
+        case .month: previousStart = calendar.date(byAdding: .month, value: -1, to: interval.start)
+        }
+        guard let previousStart else { return [] }
+        let previousInterval = DateInterval(start: previousStart, end: interval.start)
+        return store.measurements.filter { previousInterval.contains($0.timestamp) }
+    }
+    private var currentInterval: DateInterval? {
+        let calendar = Calendar.current
+        switch period {
+        case .today:
+            let start = calendar.startOfDay(for: .now)
+            guard let end = calendar.date(byAdding: .day, value: 1, to: start) else { return nil }
+            return DateInterval(start: start, end: end)
+        case .week:
+            return calendar.dateInterval(of: .weekOfYear, for: .now)
+        case .month:
+            return calendar.dateInterval(of: .month, for: .now)
+        }
+    }
+    private var comparisonText: String {
+        guard !filteredMeasurements.isEmpty, !previousMeasurements.isEmpty else {
+            return "Save readings in both periods to calculate a comparison."
+        }
+        let previousAverage = previousMeasurements.map(\.decibels).reduce(0, +) / Double(previousMeasurements.count)
+        let difference = averageNoise - previousAverage
+        if abs(difference) < 0.5 { return "Average noise is about the same as the previous period." }
+        return "Average noise is \(abs(difference).formatted(.number.precision(.fractionLength(1)))) dB \(difference < 0 ? "quieter" : "noisier") than the previous period."
+    }
+    private var csvText: String {
+        let formatter = ISO8601DateFormatter()
+        let rows = filteredMeasurements.map { measurement in
+            let location = measurement.locationName.replacingOccurrences(of: "\"", with: "\"\"")
+            return "\(formatter.string(from: measurement.timestamp)),\(measurement.decibels.formatted(.number.precision(.fractionLength(1)))),\(measurement.status.rawValue),\"\(location)\",\(measurement.latitude),\(measurement.longitude)"
+        }
+        return (["timestamp,decibels,status,location,latitude,longitude"] + rows).joined(separator: "\n")
+    }
 
     var body: some View {
         ScrollView {
@@ -81,6 +126,36 @@ struct ReportsView: View {
                         }
                     }
                 }
+
+                if store.hasAdvancedReports {
+                    AppCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Label("Noise Guardian Insights", systemImage: "shield.lefthalf.filled")
+                                .font(.headline)
+                                .foregroundStyle(AppTheme.accent)
+                            Text(comparisonText)
+                                .font(.subheadline)
+                            HStack {
+                                Label("\(filteredMeasurements.count) current", systemImage: "chart.bar.fill")
+                                Spacer()
+                                Label("\(previousMeasurements.count) previous", systemImage: "clock.arrow.circlepath")
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            Button("Export \(period.rawValue) CSV", systemImage: "square.and.arrow.up") {
+                                showingExporter = true
+                            }
+                            .buttonStyle(SecondaryButtonStyle())
+                            .disabled(filteredMeasurements.isEmpty)
+                        }
+                    }
+                } else {
+                    AppCard {
+                        Label("Unlock Noise Guardian for period comparisons and CSV export.", systemImage: "lock.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             .padding()
         }
@@ -88,6 +163,29 @@ struct ReportsView: View {
         .navigationTitle("Noise History & Reports")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        .fileExporter(
+            isPresented: $showingExporter,
+            document: NoiseCSVDocument(text: csvText),
+            contentType: .commaSeparatedText,
+            defaultFilename: "SilentSpot-\(period.rawValue)-Report"
+        ) { _ in }
+    }
+}
+
+private struct NoiseCSVDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.commaSeparatedText] }
+    let text: String
+
+    init(text: String) {
+        self.text = text
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        text = configuration.file.regularFileContents.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: Data(text.utf8))
     }
 }
 
@@ -112,6 +210,7 @@ struct ProfileView: View {
     @State private var showingReports = false
     @State private var showingNotifications = false
     @State private var showingRewards = false
+    @State private var showingFocusTimer = false
 
     var body: some View {
         ScrollView {
@@ -146,6 +245,35 @@ struct ProfileView: View {
 
                 Button("Spend Points", systemImage: "gift.fill") { showingRewards = true }
                     .buttonStyle(PrimaryButtonStyle())
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Reward Tools").font(.title2.bold())
+                    RewardToolCard(
+                        title: "Focus Timer",
+                        detail: store.hasFocusTimer ? "25 or 50 minute focus sessions" : "Unlock Calm Listener for 100 points",
+                        symbol: "timer",
+                        isUnlocked: store.hasFocusTimer
+                    ) {
+                        if store.hasFocusTimer { showingFocusTimer = true } else { showingRewards = true }
+                    }
+                    RewardToolCard(
+                        title: "Smart Finder",
+                        detail: store.hasSmartFinder ? "Radius and sorting controls are active on the Map" : "Unlock Quiet Explorer for 200 points",
+                        symbol: "location.magnifyingglass",
+                        isUnlocked: store.hasSmartFinder
+                    ) {
+                        if !store.hasSmartFinder { showingRewards = true }
+                    }
+                    RewardToolCard(
+                        title: "Advanced Reports",
+                        detail: store.hasAdvancedReports ? "Comparisons and CSV export are available" : "Unlock Noise Guardian for 350 points",
+                        symbol: "chart.xyaxis.line",
+                        isUnlocked: store.hasAdvancedReports
+                    ) {
+                        if store.hasAdvancedReports { showingReports = true } else { showingRewards = true }
+                    }
+                }
+
                 Button("Noise History & Reports", systemImage: "chart.xyaxis.line") { showingReports = true }
                     .buttonStyle(SecondaryButtonStyle())
                 Button("Notifications", systemImage: "bell.fill") { showingNotifications = true }
@@ -163,6 +291,126 @@ struct ProfileView: View {
         .sheet(isPresented: $showingReports) { NavigationStack { ReportsView() } }
         .sheet(isPresented: $showingNotifications) { NavigationStack { NotificationsView() } }
         .sheet(isPresented: $showingRewards) { NavigationStack { RewardsShopView() } }
+        .sheet(isPresented: $showingFocusTimer) { NavigationStack { FocusTimerView() } }
+    }
+}
+
+private struct RewardToolCard: View {
+    let title: String
+    let detail: String
+    let symbol: String
+    let isUnlocked: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: isUnlocked ? symbol : "lock.fill")
+                    .font(.title2)
+                    .foregroundStyle(isUnlocked ? AppTheme.accent : Color.secondary)
+                    .frame(width: 42, height: 42)
+                    .background(AppTheme.softTeal, in: Circle())
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(.headline)
+                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: isUnlocked ? "chevron.right" : "gift.fill")
+                    .foregroundStyle(AppTheme.accent)
+            }
+            .padding()
+            .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator)))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct FocusTimerView: View {
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("silentSpot.focusEndTimestamp") private var endTimestamp = 0.0
+    @AppStorage("silentSpot.focusDurationSeconds") private var durationSeconds = 25.0 * 60
+    @State private var selectedMinutes = 25
+
+    private let notificationID = "silentSpot.focusTimer.complete"
+
+    var body: some View {
+        VStack(spacing: 24) {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                let remaining = max(0, endTimestamp - context.date.timeIntervalSince1970)
+                let running = remaining > 0
+                VStack(spacing: 14) {
+                    ZStack {
+                        Circle().stroke(AppTheme.softTeal, lineWidth: 18)
+                        Circle()
+                            .trim(from: 0, to: running ? remaining / max(durationSeconds, 1) : 0)
+                            .stroke(AppTheme.accent, style: StrokeStyle(lineWidth: 18, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                        VStack(spacing: 4) {
+                            Image(systemName: running ? "brain.head.profile.fill" : "timer")
+                                .font(.title)
+                                .foregroundStyle(AppTheme.accent)
+                            Text(timeText(remaining))
+                                .font(.system(size: 44, weight: .bold, design: .rounded))
+                            Text(running ? "Focus session active" : "Ready to focus")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(width: 250, height: 250)
+
+                    if running {
+                        Button("End Session", systemImage: "stop.fill") { cancelSession() }
+                            .buttonStyle(SecondaryButtonStyle())
+                    }
+                }
+            }
+
+            Picker("Duration", selection: $selectedMinutes) {
+                Text("25 min").tag(25)
+                Text("50 min").tag(50)
+            }
+            .pickerStyle(.segmented)
+            .disabled(endTimestamp > Date.now.timeIntervalSince1970)
+
+            Button("Start Focus Session", systemImage: "play.fill") { startSession() }
+                .buttonStyle(PrimaryButtonStyle())
+                .disabled(endTimestamp > Date.now.timeIntervalSince1970)
+
+            Text("You can leave the app while the timer runs. SilentSpot will send a local alert when the session ends.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding()
+        .background(AppTheme.background)
+        .navigationTitle("Focus Timer")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+    }
+
+    private func startSession() {
+        let seconds = TimeInterval(selectedMinutes * 60)
+        durationSeconds = seconds
+        endTimestamp = Date.now.addingTimeInterval(seconds).timeIntervalSince1970
+        Task {
+            await NotificationService.schedule(
+                identifier: notificationID,
+                title: "Focus session complete",
+                body: "Great work — your \(selectedMinutes)-minute SilentSpot focus session is finished.",
+                after: seconds
+            )
+        }
+    }
+
+    private func cancelSession() {
+        endTimestamp = 0
+        NotificationService.cancel(identifier: notificationID)
+    }
+
+    private func timeText(_ interval: TimeInterval) -> String {
+        let total = Int(interval.rounded(.up))
+        return String(format: "%02d:%02d", total / 60, total % 60)
     }
 }
 
@@ -186,10 +434,10 @@ struct RewardsShopView: View {
                 }
                 .padding(.vertical, 6)
             } footer: {
-                Text("Earn 10 points for a noise measurement and 50 points for submitting a new quiet spot.")
+                Text("Earn 10 points for a noise measurement, points for community verification, and 50 points for submitting a new quiet spot.")
             }
 
-            Section("Profile Rewards") {
+            Section("Reward Tools & Titles") {
                 ForEach(store.rewards) { reward in
                     RewardShopRow(
                         reward: reward,
@@ -219,7 +467,7 @@ struct RewardsShopView: View {
             ? await store.equipReward(reward)
             : await store.purchaseReward(reward)
         resultMessage = success
-            ? (alreadyPurchased ? "\(reward.title) is now equipped." : "\(reward.title) was unlocked and equipped.")
+            ? (alreadyPurchased ? "\(reward.title) is now equipped." : "\(reward.title) and its tool were unlocked and equipped.")
             : (store.backendError ?? "The reward could not be updated.")
         showingResult = true
     }

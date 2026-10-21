@@ -153,21 +153,21 @@ struct RewardItem: Identifiable, Hashable {
             id: "calm-listener",
             symbol: "headphones.circle.fill",
             title: "Calm Listener",
-            detail: "A special profile title for regular noise contributors.",
+            detail: "Unlock 25 and 50 minute Focus Timers with completion alerts.",
             cost: 100
         ),
         RewardItem(
             id: "quiet-explorer",
             symbol: "safari.fill",
             title: "Quiet Explorer",
-            detail: "Show the community that you discover peaceful places.",
+            detail: "Unlock Smart Finder radius controls and map sorting.",
             cost: 200
         ),
         RewardItem(
             id: "noise-guardian",
             symbol: "shield.lefthalf.filled",
             title: "Noise Guardian",
-            detail: "A premium title for dedicated SilentSpot contributors.",
+            detail: "Unlock period comparisons and CSV report export.",
             cost: 350
         )
     ]

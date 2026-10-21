@@ -394,4 +394,22 @@ enum NotificationService {
         )
         try? await UNUserNotificationCenter.current().add(request)
     }
+
+    static func schedule(identifier: String, title: String, body: String, after interval: TimeInterval) async {
+        guard interval > 0, await requestPermission() else { return }
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        let request = UNNotificationRequest(
+            identifier: identifier,
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
+        )
+        try? await UNUserNotificationCenter.current().add(request)
+    }
+
+    static func cancel(identifier: String) {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [identifier])
+    }
 }
