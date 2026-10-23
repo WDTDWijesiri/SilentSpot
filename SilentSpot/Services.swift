@@ -109,6 +109,9 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
     let manager = CLLocationManager()
     private var focusSpots: [UUID: QuietSpot] = [:]
     private var triggeredFocusSpots: Set<UUID> = []
+    private var requestedFocusSpots: [QuietSpot] = []
+    private var focusZonesAreEnabled = false
+    private var requestedAlwaysAuthorization = false
 
     override init() {
         super.init()
@@ -198,19 +201,48 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
     }
 
     func syncFocusZones(spots: [QuietSpot], enabled: Bool) {
-        focusSpots = Dictionary(uniqueKeysWithValues: spots.map { ($0.id, $0) })
+        requestedFocusSpots = spots.filter { $0.status == .quiet }
+        focusZonesAreEnabled = enabled
+        refreshFocusZones()
+    }
+
+    private func refreshFocusZones() {
         manager.monitoredRegions
             .filter { $0.identifier.hasPrefix("silentspot.") }
             .forEach(manager.stopMonitoring(for:))
 
-        guard enabled, CLLocationManager.isMonitoringAvailable(for: CLCircularRegion.self) else { return }
-        if manager.authorizationStatus == .authorizedWhenInUse {
+        guard focusZonesAreEnabled,
+              CLLocationManager.isMonitoringAvailable(for: CLCircularRegion.self) else {
+            focusSpots = [:]
+            return
+        }
+
+        if manager.authorizationStatus == .authorizedWhenInUse, !requestedAlwaysAuthorization {
+            requestedAlwaysAuthorization = true
             manager.requestAlwaysAuthorization()
         } else if manager.authorizationStatus == .notDetermined {
             manager.requestWhenInUseAuthorization()
         }
 
-        for spot in spots.prefix(20) {
+        guard manager.authorizationStatus == .authorizedWhenInUse || manager.authorizationStatus == .authorizedAlways else {
+            focusSpots = [:]
+            return
+        }
+
+        let referenceLocation = location ?? manager.location
+        let selectedSpots = requestedFocusSpots
+            .sorted { first, second in
+                if first.isFavourite != second.isFavourite { return first.isFavourite }
+                if first.isVerified != second.isVerified { return first.isVerified }
+                guard let referenceLocation else { return first.lastMeasured > second.lastMeasured }
+                return (first.distance(from: referenceLocation) ?? .greatestFiniteMagnitude) <
+                    (second.distance(from: referenceLocation) ?? .greatestFiniteMagnitude)
+            }
+            .prefix(20)
+        focusSpots = Dictionary(uniqueKeysWithValues: selectedSpots.map { ($0.id, $0) })
+        triggeredFocusSpots.formIntersection(focusSpots.keys)
+
+        for spot in selectedSpots {
             let region = CLCircularRegion(
                 center: spot.coordinate,
                 radius: 120,
@@ -228,6 +260,7 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
         if manager.authorizationStatus == .authorizedWhenInUse || manager.authorizationStatus == .authorizedAlways {
             locationErrorMessage = nil
             manager.startUpdatingLocation()
+            refreshFocusZones()
         } else if manager.authorizationStatus == .denied {
             locationErrorMessage = "SilentSpot location access is denied. Select While Using the App in Settings."
         }
@@ -242,7 +275,7 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
             if distance <= 120, !triggeredFocusSpots.contains(id) {
                 triggeredFocusSpots.insert(id)
                 focusPrompt = FocusPrompt(spotID: id, spotName: spot.name)
-                Task { await NotificationService.send(title: "You arrived at \(spot.name)", body: "Your favourite quiet place is nearby. Start Focus Mode?") }
+                Task { await NotificationService.send(title: "Quiet place arrived", body: "You are near \(spot.name), which is currently quiet. Start Focus Mode?") }
             } else if distance > 180 {
                 triggeredFocusSpots.remove(id)
             }
@@ -255,7 +288,7 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
               let spot = focusSpots[id] else { return }
         triggeredFocusSpots.insert(id)
         focusPrompt = FocusPrompt(spotID: id, spotName: spot.name)
-        Task { await NotificationService.send(title: "You arrived at \(spot.name)", body: "Your favourite quiet place is nearby. Start Focus Mode?") }
+        Task { await NotificationService.send(title: "Quiet place arrived", body: "You are near \(spot.name), which is currently quiet. Start Focus Mode?") }
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {

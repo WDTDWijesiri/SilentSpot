@@ -579,13 +579,26 @@ struct SettingsView: View {
                         }
                     }
                 ))
-                Toggle("Favourite Focus Zones", isOn: Binding(
+                Toggle("Nearby Quiet Place Alerts", isOn: Binding(
                     get: { store.focusZonesEnabled },
                     set: { enabled in
-                        store.setFocusZonesEnabled(enabled)
-                        locationService.syncFocusZones(spots: store.favourites, enabled: enabled)
+                        if enabled {
+                            Task {
+                                let notificationsAllowed = await NotificationService.requestPermission()
+                                store.setNotificationsEnabled(notificationsAllowed)
+                                store.setFocusZonesEnabled(notificationsAllowed)
+                                if notificationsAllowed { locationService.requestPermission() }
+                                locationService.syncFocusZones(spots: store.arrivalAlertSpots, enabled: notificationsAllowed)
+                            }
+                        } else {
+                            store.setFocusZonesEnabled(false)
+                            locationService.syncFocusZones(spots: [], enabled: false)
+                        }
                     }
                 ))
+                Text("Alerts when you come within about 120 m of a quiet community spot. Choose Always Allow for notifications while SilentSpot is closed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Section("Appearance") {
                 Picker("Theme", selection: Binding(
@@ -619,7 +632,8 @@ struct SettingsView: View {
 
     private var locationText: String {
         switch locationService.authorizationStatus {
-        case .authorizedAlways, .authorizedWhenInUse: "While Using"
+        case .authorizedAlways: "Always"
+        case .authorizedWhenInUse: "While Using"
         case .denied, .restricted: "Not Allowed"
         case .notDetermined: "Not Requested"
         @unknown default: "Unknown"

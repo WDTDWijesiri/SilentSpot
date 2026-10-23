@@ -1,4 +1,5 @@
 import Charts
+import Combine
 import MapKit
 import SwiftUI
 
@@ -34,20 +35,23 @@ struct MainTabView: View {
         }
         .alert(item: $locationService.focusPrompt) { prompt in
             Alert(
-                title: Text("Focus zone reached"),
-                message: Text("You arrived at \(prompt.spotName). Start a focused study session?"),
-                primaryButton: .default(Text("Start Focus")) { store.recordFocusArrival(prompt) },
-                secondaryButton: .cancel()
+                title: Text("Quiet place nearby"),
+                message: Text("You arrived near \(prompt.spotName). This place is currently quiet."),
+                primaryButton: .default(Text("View Map")) { selection = .map },
+                secondaryButton: .cancel(Text("Later"))
             )
         }
         .onAppear {
-            locationService.syncFocusZones(spots: store.favourites, enabled: store.focusZonesEnabled)
+            locationService.syncFocusZones(spots: store.arrivalAlertSpots, enabled: store.focusZonesEnabled)
         }
-        .onChange(of: store.favourites.map(\.id)) { _, _ in
-            locationService.syncFocusZones(spots: store.favourites, enabled: store.focusZonesEnabled)
+        .onChange(of: store.arrivalAlertSpots) { _, spots in
+            locationService.syncFocusZones(spots: spots, enabled: store.focusZonesEnabled)
         }
         .onChange(of: store.focusZonesEnabled) { _, enabled in
-            locationService.syncFocusZones(spots: store.favourites, enabled: enabled)
+            locationService.syncFocusZones(spots: store.arrivalAlertSpots, enabled: enabled)
+        }
+        .onReceive(locationService.$focusPrompt.compactMap { $0 }) { prompt in
+            store.recordFocusArrival(prompt)
         }
     }
 }

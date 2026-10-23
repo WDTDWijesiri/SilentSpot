@@ -36,6 +36,9 @@ final class AppStore: ObservableObject {
     }
 
     var favourites: [QuietSpot] { spots.filter(\.isFavourite) }
+    var arrivalAlertSpots: [QuietSpot] {
+        spots.filter { $0.status == .quiet }
+    }
     var verifiedCount: Int { spots.filter { $0.isVerified && $0.isSubmittedByCurrentUser }.count }
     var contributionCount: Int { measurements.count }
     var isFirebaseConfigured: Bool { firebase.isConfigured }
@@ -271,7 +274,7 @@ final class AppStore: ObservableObject {
             let item = AppNotification(
                 symbol: "location.fill",
                 title: "You arrived at \(prompt.spotName)",
-                message: "Start a focus session in your saved quiet place?",
+                message: "This nearby community place is currently quiet. Start a focus session?",
                 date: .now
             )
             do { try await firebase.saveNotification(item) }
