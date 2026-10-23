@@ -14,6 +14,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		T00000000000000000000170 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 000000000000000000000000 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 000000000000000100000000;
+			remoteInfo = SilentSpot;
+		};
 		W00000000000000000000170 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 000000000000000000000000 /* Project object */;
@@ -37,6 +44,7 @@
 
 /* Begin PBXFileReference section */
 		000000000000000000000120 /* SilentSpot.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SilentSpot.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		T00000000000000000000120 /* SilentSpotTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SilentSpotTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		W00000000000000000000120 /* SilentSpotWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SilentSpotWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -44,6 +52,11 @@
 		000000000000000000000010 /* SilentSpot */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = SilentSpot;
+			sourceTree = "<group>";
+		};
+		T00000000000000000000010 /* SilentSpotTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = SilentSpotTests;
 			sourceTree = "<group>";
 		};
 		W00000000000000000000010 /* SilentSpotWidget */ = {
@@ -67,6 +80,11 @@
 			files = (
 			);
 		};
+		T00000000000000000000130 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -74,6 +92,7 @@
 			isa = PBXGroup;
 			children = (
 				000000000000000000000010 /* SilentSpot */,
+				T00000000000000000000010 /* SilentSpotTests */,
 				W00000000000000000000010 /* SilentSpotWidget */,
 				000000000000000000000020 /* Products */,
 			);
@@ -83,6 +102,7 @@
 			isa = PBXGroup;
 			children = (
 				000000000000000000000120 /* SilentSpot.app */,
+				T00000000000000000000120 /* SilentSpotTests.xctest */,
 				W00000000000000000000120 /* SilentSpotWidget.appex */,
 			);
 			name = Products;
@@ -118,6 +138,27 @@
 			productReference = 000000000000000000000120 /* SilentSpot.app */;
 			productType = "com.apple.product-type.application";
 		};
+		T00000000000000000000100 /* SilentSpotTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = T00000000000000000000110 /* Build configuration list for PBXNativeTarget "SilentSpotTests" */;
+			buildPhases = (
+				T00000000000000000000121 /* Sources */,
+				T00000000000000000000130 /* Frameworks */,
+				T00000000000000000000140 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				T00000000000000000000160 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				T00000000000000000000010 /* SilentSpotTests */,
+			);
+			name = SilentSpotTests;
+			productName = SilentSpotTests;
+			productReference = T00000000000000000000120 /* SilentSpotTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		W00000000000000000000100 /* SilentSpotWidget */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = W00000000000000000000110 /* Build configuration list for PBXNativeTarget "SilentSpotWidget" */;
@@ -149,6 +190,10 @@
 					000000000000000100000000 = {
 						CreatedOnToolsVersion = 26.3;
 					};
+					T00000000000000000000100 = {
+						CreatedOnToolsVersion = 27.1;
+						TestTargetID = 000000000000000100000000;
+					};
 					W00000000000000000000100 = {
 						CreatedOnToolsVersion = 26.3;
 					};
@@ -172,6 +217,7 @@
 			projectRoot = "";
 			targets = (
 				000000000000000100000000 /* SilentSpot */,
+				T00000000000000000000100 /* SilentSpotTests */,
 				W00000000000000000000100 /* SilentSpotWidget */,
 			);
 		};
@@ -179,6 +225,11 @@
 
 /* Begin PBXResourcesBuildPhase section */
 		000000000000000140000000 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
+		T00000000000000000000140 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			files = (
 			);
@@ -196,6 +247,11 @@
 			files = (
 			);
 		};
+		T00000000000000000000121 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
 		W00000000000000000000121 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			files = (
@@ -204,6 +260,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		T00000000000000000000160 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 000000000000000100000000 /* SilentSpot */;
+			targetProxy = T00000000000000000000170 /* PBXContainerItemProxy */;
+		};
 		W00000000000000000000160 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = W00000000000000000000100 /* SilentSpotWidget */;
@@ -438,6 +499,60 @@
 			};
 			name = Release;
 		};
+		T00000000000000000000111 /* Debug configuration for PBXNativeTarget "SilentSpotTests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KDCZSHJ2KQ;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.thanuja.silentspot.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SilentSpot.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SilentSpot";
+				TEST_TARGET_NAME = SilentSpot;
+			};
+			name = Debug;
+		};
+		T00000000000000000000112 /* Release configuration for PBXNativeTarget "SilentSpotTests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KDCZSHJ2KQ;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.thanuja.silentspot.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SilentSpot.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SilentSpot";
+				TEST_TARGET_NAME = SilentSpot;
+			};
+			name = Release;
+		};
 		W00000000000000000000111 /* Debug configuration for PBXNativeTarget "SilentSpotWidget" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -515,6 +630,15 @@
 				000000000000000111000000 /* Debug configuration for PBXNativeTarget "SilentSpot" */,
 				000000000000000112000000 /* Release configuration for PBXNativeTarget "SilentSpot" */,
 			);
+			defaultConfigurationName = Release;
+		};
+		T00000000000000000000110 /* Build configuration list for PBXNativeTarget "SilentSpotTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				T00000000000000000000111 /* Debug configuration for PBXNativeTarget "SilentSpotTests" */,
+				T00000000000000000000112 /* Release configuration for PBXNativeTarget "SilentSpotTests" */,
+			);
+			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 		W00000000000000000000110 /* Build configuration list for PBXNativeTarget "SilentSpotWidget" */ = {
